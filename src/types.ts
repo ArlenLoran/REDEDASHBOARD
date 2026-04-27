@@ -45,3 +45,23 @@ export interface ChartData {
   new: number;
   total: number;
 }
+
+export interface QualityMetric {
+  label: string;
+  plannedProfile: number;
+  realProfile: number;
+  plannedDay: number;
+  trend: 'up' | 'down';
+}
+
+export interface AgeMetric {
+  os: string;
+  dateTime: string;
+  pieces: number;
+  age: string;
+  pwi: string;
+  psr: string;
+  pcg: string;
+  psk: string;
+  others: string;
+}

@@ -21,7 +21,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 0,
     totalAvailable: 0,
     deltaProduction: 0,
-    isLoading: true,
+    isLoading: false,
   },
   'RECEBIMENTO': {
     title: 'RECEBIMENTO',
@@ -103,4 +103,17 @@ export const MOCK_CHART_DATA: ChartData[] = [
   { hour: '08h - 09h', lab: 300, rev: 350, new: 400, total: 950 },
   { hour: '09h - 10h', lab: 450, rev: 500, new: 550, total: 1500 },
   { hour: '10h - 11h', lab: 500, rev: 400, new: 600, total: 1600 },
+];
+
+export const MOCK_QUALITY_DATA = [
+  { label: 'LIBERADO TRIAGEM', plannedProfile: 80, realProfile: 85, plannedDay: 5, trend: 'up' },
+  { label: 'DESCARTE', plannedProfile: 12, realProfile: 6, plannedDay: 6, trend: 'down' },
+  { label: 'DOA', plannedProfile: 8, realProfile: 9, plannedDay: 1, trend: 'up' },
+  { label: 'EXCEÇÃO', plannedProfile: 8, realProfile: 9, plannedDay: 1, trend: 'up' },
+];
+
+export const MOCK_AGE_DATA = [
+  { os: 'OS001', dateTime: '27/04 08:30', pieces: 150, age: '10h', pwi: 'OK', psr: 'OK', pcg: 'OK', psk: 'OK', others: '-' },
+  { os: 'OS002', dateTime: '27/04 09:15', pieces: 85, age: '22h', pwi: 'OK', psr: 'OK', pcg: 'PEND', psk: 'OK', others: '-' },
+  { os: 'OS003', dateTime: '26/04 14:20', pieces: 300, age: '40h', pwi: 'OK', psr: 'FAIL', pcg: 'OK', psk: 'OK', others: 'Peça falta' },
 ];
