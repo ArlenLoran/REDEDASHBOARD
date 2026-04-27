@@ -22,21 +22,29 @@ export default function App() {
         const apiResults = await fetchApiData();
         const totalQtd = apiResults.reduce((acc, item) => acc + item.QTD, 0);
         
-        // Add or update the "Teste API" card
+        // Update the "Teste API" card
         setSummaryData(prev => ({
           ...prev,
           'Teste API': {
             title: 'Teste API',
-            plannedDay: totalQtd, // using total QTD from API as a sample metric
+            plannedDay: totalQtd,
             plannedToHour: Math.floor(totalQtd * 0.4),
             realToHour: Math.floor(totalQtd * 0.45),
             delta: Math.floor(totalQtd * 0.05),
             totalAvailable: totalQtd,
             deltaProduction: 10,
+            isLoading: false,
           }
         }));
       } catch (err) {
         console.error("Failed to load API data", err);
+        setSummaryData(prev => ({
+          ...prev,
+          'Teste API': {
+            ...prev['Teste API'],
+            isLoading: false,
+          }
+        }));
       }
     }
     loadApiData();

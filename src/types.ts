@@ -27,6 +27,7 @@ export interface SummaryMetric {
   delta: number; // calculated as real - planned
   totalAvailable: number;
   deltaProduction: number;
+  isLoading?: boolean;
 }
 
 export interface DetailedMetric {

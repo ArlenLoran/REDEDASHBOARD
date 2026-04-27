@@ -13,6 +13,16 @@ export const COLORS = {
 };
 
 export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
+  'Teste API': {
+    title: 'Teste API',
+    plannedDay: 0,
+    plannedToHour: 0,
+    realToHour: 0,
+    delta: 0,
+    totalAvailable: 0,
+    deltaProduction: 0,
+    isLoading: true,
+  },
   'RECEBIMENTO': {
     title: 'RECEBIMENTO',
     plannedDay: 3860,
