@@ -29,9 +29,9 @@ export default function Sidebar({ activeTab, onSelect }: SidebarProps) {
           <button
             key={item}
             onClick={() => onSelect(item)}
-            className={`w-full text-left px-4 py-2 text-sm font-bold tracking-tight transition-all uppercase rounded-sm border-b-2 border-transparent ${
+            className={`w-full text-left px-4 py-2 text-sm font-bold tracking-tight transition-all uppercase rounded-l-full border-b-2 border-transparent ${
               activeTab === item 
-                ? 'bg-white text-black shadow-md rounded-l-full -mr-2 relative z-20 translate-x-2 hover:bg-white' 
+                ? 'bg-white text-black shadow-md -mr-2 relative z-20 translate-x-2 hover:bg-white' 
                 : 'text-black bg-white/20 hover:bg-white/40'
             }`}
           >

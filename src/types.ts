@@ -1,3 +1,13 @@
+export interface ApiResponseItem {
+  DATA: string;
+  QTD: number;
+  ITEM: string;
+  MASCARA: string;
+  STATUS: string;
+  USUARIO: string;
+  STATUSES2: string;
+}
+
 export type DashboardTab = 
   | 'RESUMO' 
   | 'RECEBIMENTO' 
