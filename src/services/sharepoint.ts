@@ -207,7 +207,7 @@ export async function spCreateList(listName: string, template: number = 100): Pr
       headers: headersJson(),
       body: JSON.stringify(body)
     });
-    if (!resp.status) return { status: false, message: await parseSpError(resp) };
+    if (!resp.ok) return { status: false, message: await parseSpError(resp) };
     return { status: true, data: true };
   } catch (error: any) {
     return { status: false, message: error.message };

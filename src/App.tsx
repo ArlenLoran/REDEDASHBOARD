@@ -253,6 +253,7 @@ export default function App() {
         <Header 
           toggleSidebar={() => setIsSidebarVisible(!isSidebarVisible)}
           isSidebarVisible={isSidebarVisible}
+          isSpConnected={hasSpContext()}
         />
         <main className="flex-1 overflow-y-auto p-2 sm:p-4 scrollbar-hide">
           {renderContent()}

@@ -25,16 +25,22 @@ export async function ensureConfigList(): Promise<void> {
   const exists = await spListExists(LIST_NAME);
   if (!exists) {
     console.log(`Creating list ${LIST_NAME}...`);
-    await spCreateList(LIST_NAME);
+    const createRes = await spCreateList(LIST_NAME);
+    if (!createRes.status) {
+      console.error(`Failed to create list: ${createRes.message}`);
+      return;
+    }
   }
 
   // Ensure columns
+  console.log("Ensuring columns exist...");
   await spListEnsureTextField(LIST_NAME, COL_DATE);
   await spListEnsureNumberField(LIST_NAME, COL_INTERVAL);
 
   // Check if we have an item, if not create one
   const items = await spListGetItems(LIST_NAME);
   if (items.status && items.data.length === 0) {
+    console.log("Creating default configuration item...");
     await spListAddItem(LIST_NAME, {
       Title: 'Configuracao Geral',
       [COL_DATE]: new Date().toISOString(),
