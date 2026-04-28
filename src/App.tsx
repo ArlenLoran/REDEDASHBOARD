@@ -37,16 +37,12 @@ export default function App() {
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
 
-  const updateStateWithResults = (results: { teste?: any[], kit?: any[] }) => {
+  const updateStateWithCalculatedResults = (results: { teste?: any; kit?: any }) => {
     setSummaryData(prev => {
       const next = { ...prev };
       
       if (results.teste) {
-        const totalQtd = results.teste.reduce((acc: number, item: any) => {
-          const val = item.QTD ?? item.qtd ?? 0;
-          return acc + Number(val);
-        }, 0);
-        
+        const { totalQtd } = results.teste;
         next['Teste API'] = {
           ...next['Teste API'],
           plannedDay: totalQtd,
@@ -59,11 +55,7 @@ export default function App() {
       }
 
       if (results.kit) {
-        const totalDisp = results.kit.reduce((acc: number, item: any) => {
-          const val = item.QUANTIDADE ?? item.quantidade ?? 0;
-          return acc + Number(val);
-        }, 0);
-
+        const { totalDisp } = results.kit;
         next['MONTAGEM KIT'] = {
           ...next['MONTAGEM KIT'],
           totalAvailable: totalDisp,
@@ -85,11 +77,6 @@ export default function App() {
         const diffSeconds = (Date.now() - last.getTime()) / 1000;
         const intervalSeconds = config.intervalMinutes * 60;
 
-        // If it was a manual key refresh OR time has passed, try to refresh from API
-        const isExpired = diffSeconds >= intervalSeconds || diffSeconds < 0;
-        const shouldRefreshPool = !key && isExpired;
-        const isManualSingle = !!key;
-
         // Sync local timers with SharePoint source of truth
         if (!key) {
           setLastUpdateTime(last);
@@ -97,14 +84,16 @@ export default function App() {
           setSecondsUntilRefresh(remaining);
         }
 
-        // If time hasn't passed and it's not a manual refresh, just use the cache from columns
-        if (!isManualSingle && !isExpired) {
+        const isExpired = diffSeconds >= intervalSeconds || diffSeconds < 0;
+
+        // If time hasn't passed and it's not a manual refresh, just use the processed cache from columns
+        if (!key && !isExpired) {
           try {
             const results: any = {};
             if (config.cacheTeste) results.teste = JSON.parse(config.cacheTeste);
             if (config.cacheKit) results.kit = JSON.parse(config.cacheKit);
             if (Object.keys(results).length > 0) {
-              updateStateWithResults(results);
+              updateStateWithCalculatedResults(results);
               return;
             }
           } catch (e) {
@@ -118,22 +107,30 @@ export default function App() {
 
         if (locked) {
           try {
-            // If it was a manual refresh for one key, we could fetch just one, 
-            // but for simplicity and to keep cache consistent, we fetch all.
+            // Fetch raw data
             const apiData = await fetchApiData();
             const rawApi = Array.isArray(apiData) ? apiData : ((apiData as any)?.value || []);
             
             const kitData = await fetchKitData();
             const rawKit = Array.isArray(kitData) ? kitData : ((kitData as any)?.value || []);
 
-            // Save to SharePoint
+            // CALCULATE AGGREGATES BEFORE SAVING
+            const testeCalculated = {
+              totalQtd: rawApi.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0)
+            };
+
+            const kitCalculated = {
+              totalDisp: rawKit.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0)
+            };
+
+            // Save small JSON to SharePoint
             await updateApiCache(config.id, {
-              teste: JSON.stringify(rawApi),
-              kit: JSON.stringify(rawKit)
+              teste: JSON.stringify(testeCalculated),
+              kit: JSON.stringify(kitCalculated)
             });
 
             // Update local state
-            updateStateWithResults({ teste: rawApi, kit: rawKit });
+            updateStateWithCalculatedResults({ teste: testeCalculated, kit: kitCalculated });
             
             if (!key) {
               setLastUpdateTime(new Date());
@@ -146,15 +143,14 @@ export default function App() {
             await releaseLock(config.id);
           }
         } else {
-          // Lock held by someone else, pull current cache which might be being updated
-          // We can wait a few seconds or just pull what is there.
+          // Pull current cache
           const freshConfig = await getAppConfig();
           if (freshConfig) {
             try {
               const res: any = {};
               if (freshConfig.cacheTeste) res.teste = JSON.parse(freshConfig.cacheTeste);
               if (freshConfig.cacheKit) res.kit = JSON.parse(freshConfig.cacheKit);
-              updateStateWithResults(res);
+              updateStateWithCalculatedResults(res);
             } catch (e) { /* ignore */ }
           }
         }
@@ -181,11 +177,13 @@ export default function App() {
         if (k === 'Teste API') {
           const rawData = await fetchApiData();
           const apiResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
-          updateStateWithResults({ teste: apiResults });
+          const totalQtd = apiResults.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0);
+          updateStateWithCalculatedResults({ teste: { totalQtd } });
         } else if (k === 'MONTAGEM KIT') {
           const rawData = await fetchKitData();
           const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
-          updateStateWithResults({ kit: kitResults });
+          const totalDisp = kitResults.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0);
+          updateStateWithCalculatedResults({ kit: { totalDisp } });
         } else {
           await new Promise(resolve => setTimeout(resolve, 1000));
           setSummaryData(prev => ({
