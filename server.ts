@@ -5,15 +5,15 @@ import fs from "fs";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
-const XLSX = require("xlsx");
+const ExcelJS = require("exceljs");
 
 async function startServer() {
   console.log("Iniciando servidor...");
   const app = express();
   const PORT = 3000;
 
-  // API Route to read and process Excel data
-  app.get("/api/excel-data", (req, res) => {
+  // API Route to read and process Excel data using ExcelJS (more robust)
+  app.get("/api/excel-data", async (req, res) => {
     try {
       const filePath = path.join(process.cwd(), "Consenso.xlsx");
       
@@ -22,12 +22,40 @@ async function startServer() {
         return res.status(404).json({ error: "File Consenso.xlsx not found" });
       }
 
-      const workbook = XLSX.readFile(filePath);
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.readFile(filePath);
       
-      // Convert to JSON with headers
-      const data: any[] = XLSX.utils.sheet_to_json(worksheet);
+      const worksheet = workbook.getWorksheet(1); // Get the first worksheet
+      if (!worksheet) {
+        throw new Error("No worksheet found in Excel file");
+      }
+
+      const data: any[] = [];
+      const headers: string[] = [];
+      
+      // Get headers from first row
+      const firstRow = worksheet.getRow(1);
+      firstRow.eachCell((cell, colNumber) => {
+        headers[colNumber] = cell.text ? String(cell.text).trim() : "";
+      });
+
+      // Get data rows
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return; // skip header
+        const rowData: any = {};
+        row.eachCell((cell, colNumber) => {
+          const header = headers[colNumber];
+          if (header) {
+            // ExcelJS handles values better, sometimes returning objects for dates/formulas
+            let value = cell.value;
+            if (value && typeof value === 'object' && 'result' in value) {
+              value = value.result;
+            }
+            rowData[header] = value;
+          }
+        });
+        data.push(rowData);
+      });
 
       // Filter: INFORMACAO === "Montagem Kit total" AND PERIODO === "M+1"
       const filteredData = data.filter(row => {
@@ -46,7 +74,7 @@ async function startServer() {
         count: filteredData.length
       });
     } catch (error) {
-      console.error("Erro ao processar arquivo Excel:", error);
+      console.error("Erro ao processar arquivo Excel (ExcelJS):", error);
       res.status(500).json({ error: "Failed to process excel file" });
     }
   });
@@ -102,6 +130,10 @@ GROUP BY
     status_final
       `.trim();
 
+      // Adicionando um sinal de timeout para a requisição (ajuda em redes lentas/locais)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos
+
       const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -109,7 +141,10 @@ GROUP BY
           query,
           id_score: "kit_availability"
         }),
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -125,7 +160,8 @@ GROUP BY
       res.json({ totalAvailable });
     } catch (error) {
       console.error("Erro ao buscar disponibilidade KIT:", error);
-      res.status(500).json({ error: "Failed to fetch kit availability" });
+      // Retornamos 0 amigável caso a rede falhe (comum em ambiente local restrito)
+      res.json({ totalAvailable: 0, error: "Network timeout or connection refused locally" });
     }
   });
 
