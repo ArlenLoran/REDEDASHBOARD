@@ -12,6 +12,7 @@ import DetailedView from './components/DetailedView';
 import { MOCK_SUMMARY_DATA } from './constants';
 import { fetchApiData, fetchKitData } from './services/apiService';
 import { hasSpContext } from './services/sharepoint';
+import { Activity } from 'lucide-react';
 import { ensureConfigList, getAppConfig, acquireLock, releaseLock, updateApiCache, AppConfig } from './services/configService';
 
 export default function App() {
@@ -36,6 +37,15 @@ export default function App() {
   const [isSidebarVisible, setIsSidebarVisible] = useState(() => 
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
+  const [logs, setLogs] = useState<{timestamp: string, message: string, type: 'error' | 'info'}[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
+
+  const addLog = (message: string, type: 'error' | 'info' = 'info') => {
+    const timestamp = new Date().toLocaleTimeString();
+    setLogs(prev => [{timestamp, message, type}, ...prev].slice(0, 50));
+  };
+
+  const API_KEYS = ['Teste API', 'MONTAGEM KIT'];
 
   const updateStateWithCalculatedResults = (results: { teste?: any; kit?: any }) => {
     setSummaryData(prev => {
@@ -69,11 +79,13 @@ export default function App() {
   };
 
   const loadApiData = async (key?: string) => {
-    // Determine which keys we are updating
+    // Only update keys that are actually APIs
     const keysToUpdate = (key ? [key] : Object.keys(summaryData))
-      .filter(k => !summaryData[k].isLoading);
+      .filter(k => API_KEYS.includes(k) && !summaryData[k].isLoading);
 
     if (keysToUpdate.length === 0) return;
+
+    addLog(`Iniciando atualização de: ${keysToUpdate.join(', ')}`);
 
     // Set specified keys to loading
     setSummaryData(prev => {
@@ -112,6 +124,7 @@ export default function App() {
                 updateStateWithCalculatedResults(results);
               }
             } catch (e) {
+              addLog(`Erro ao processar cache: ${String(e)}`, 'error');
               console.error("Failed to parse SP cache", e);
             }
             return; // Cleanup is in finally block
@@ -148,7 +161,9 @@ export default function App() {
                 setLastUpdateTime(new Date());
                 setSecondsUntilRefresh(config.intervalMinutes * 60);
               }
+              addLog("Dados atualizados com sucesso via API");
             } catch (err) {
+              addLog(`Erro no processo de atualização: ${String(err)}`, 'error');
               console.error("Refresh failed", err);
             } finally {
               await releaseLock(config.id);
@@ -203,7 +218,9 @@ export default function App() {
           setSecondsUntilRefresh(autoRefreshInterval * 60);
         }
       }
+      addLog("Ciclo de atualização concluído");
     } catch (error) {
+      addLog(`Erro global de carregamento: ${String(error)}`, 'error');
       console.error("Global load error", error);
     } finally {
       // Ensure ALL loading states are cleared regardless of path
@@ -359,6 +376,43 @@ export default function App() {
         <main className="flex-1 overflow-y-auto p-2 sm:p-4 scrollbar-hide">
           {renderContent()}
         </main>
+        
+        {/* Floating Debug Button */}
+        {import.meta.env.VITE_SHOW_DEBUG_LOGS === 'true' && (
+          <div className="fixed bottom-6 right-6 z-[100]">
+            <button
+              onClick={() => setShowLogs(!showLogs)}
+              className="bg-black text-white p-3 rounded-full shadow-2xl hover:bg-zinc-800 transition-all flex items-center gap-2"
+            >
+              <Activity size={20} />
+              <span className="text-xs font-mono">DEBUG</span>
+              {logs.some(l => l.type === 'error') && (
+                <span className="bg-red-500 w-2 h-2 rounded-full animate-pulse" />
+              )}
+            </button>
+
+            {showLogs && (
+              <div className="absolute bottom-16 right-0 w-80 sm:w-96 max-h-[500px] bg-white border border-zinc-200 rounded-xl shadow-2xl overflow-hidden flex flex-col">
+                <div className="bg-zinc-50 p-3 border-b border-zinc-200 flex justify-between items-center">
+                  <h3 className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Logs do Sistema</h3>
+                  <button onClick={() => setLogs([])} className="text-[10px] text-blue-600 hover:underline">LIMPAR</button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-[10px]">
+                  {logs.length === 0 ? (
+                    <div className="text-zinc-400 italic text-center py-8">Nenhum evento registrado</div>
+                  ) : (
+                    logs.map((log, i) => (
+                      <div key={i} className={`p-2 rounded border ${log.type === 'error' ? 'bg-red-50 border-red-100 text-red-700' : 'bg-zinc-50 border-zinc-100 text-zinc-600'}`}>
+                        <span className="font-bold mr-2 text-zinc-400">[{log.timestamp}]</span>
+                        {log.message}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

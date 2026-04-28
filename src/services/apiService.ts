@@ -131,6 +131,7 @@ GROUP BY
     mascara,
     status_inicial,
     status_final
+    fetch first 10 rows only
   `;
 
   const body = {
