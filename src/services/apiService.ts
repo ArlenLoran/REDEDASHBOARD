@@ -77,3 +77,31 @@ export async function fetchApiData(): Promise<ApiResponseItem[]> {
     throw error;
   }
 }
+
+export async function fetchExcelSummary(): Promise<{ totalPlanned: number; count: number }> {
+  try {
+    const response = await fetch("/api/excel-data");
+    if (!response.ok) {
+      throw new Error(`Erro API Excel: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Fetch Excel error:", error);
+    throw error;
+  }
+}
+
+export async function fetchKitAvailability(): Promise<{ totalAvailable: number }> {
+  try {
+    const response = await fetch("/api/kit-availability", {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error(`Erro API Kit Availability: ${response.status}`);
+    }
+    return await response.json();
+  } catch (error) {
+    console.error("Fetch Kit Availability error:", error);
+    throw error;
+  }
+}

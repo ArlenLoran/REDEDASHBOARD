@@ -22,25 +22,25 @@ const MENU_ITEMS: DashboardTab[] = [
 export default function Sidebar({ activeTab, onSelect, isVisible }: SidebarProps) {
   return (
     <aside 
-      className={`fixed lg:relative h-full shadow-xl z-20 flex flex-col items-center transition-all duration-300 transform ${
+      className={`fixed lg:relative h-full shadow-xl z-20 flex flex-col items-center transition-[width,transform] duration-300 transform overflow-hidden ${
         isVisible ? 'w-56 translate-x-0' : 'w-0 -translate-x-full lg:w-0'
       }`} 
       style={{ backgroundColor: COLORS.dhlYellow }}
     >
-      <div className={`flex flex-col items-center w-56 h-full ${!isVisible ? 'invisible' : ''}`}>
+      <div className="flex flex-col items-center w-56 h-full shrink-0">
         {/* Top logo area */}
-        <div className="h-12 w-full" />
+        <div className="h-12 w-full shrink-0" />
 
         {/* Centered Navigation */}
-        <div className="flex-1 w-full flex flex-col justify-center space-y-0.5 pl-2 pr-0">
+        <div className="flex-1 w-full flex flex-col justify-center space-y-0.5 pl-2 pr-0 overflow-hidden">
         {MENU_ITEMS.map((item) => (
           <button
             key={item}
             onClick={() => onSelect(item)}
-            className={`w-full text-left px-2 py-1.5 text-[12.5px] font-bold tracking-tight transition-all uppercase relative ${
+            className={`w-full text-left px-2 py-1.5 text-[12.5px] font-bold tracking-tight uppercase relative ${
               activeTab === item 
                 ? 'bg-[#E5E5E5] text-black rounded-l-xl rounded-r-none z-30 outline-none' 
-                : 'text-black bg-white/5 hover:bg-white/20 mb-px mr-2 rounded-sm'
+                : 'text-black bg-white/5 hover:bg-white/20 mb-px mr-2 rounded-sm transition-colors duration-200'
             }`}
           >
             {item}

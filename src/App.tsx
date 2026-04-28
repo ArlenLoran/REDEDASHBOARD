@@ -10,7 +10,7 @@ import Header from './components/Header';
 import SummaryView from './components/SummaryView';
 import DetailedView from './components/DetailedView';
 import { MOCK_SUMMARY_DATA } from './constants';
-import { fetchApiData } from './services/apiService';
+import { fetchApiData, fetchExcelSummary, fetchKitAvailability } from './services/apiService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('RESUMO');
@@ -18,7 +18,9 @@ export default function App() {
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(0); // 0 means disabled
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState<number | null>(null);
-  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+  const [isSidebarVisible, setIsSidebarVisible] = useState(() => 
+    typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
+  );
 
   const loadApiData = async (key?: string) => {
     // Only refresh keys that are not already loading
@@ -59,6 +61,35 @@ export default function App() {
               isLoading: false,
             }
           }));
+        } else if (k === 'MONTAGEM KIT') {
+          try {
+            const [excelData, kitData] = await Promise.all([
+              fetchExcelSummary(),
+              fetchKitAvailability()
+            ]);
+            
+            setSummaryData(prev => ({
+              ...prev,
+              [k]: {
+                ...prev[k],
+                plannedDay: excelData.totalPlanned,
+                plannedToHour: Math.floor(excelData.totalPlanned * 0.4), // Exemplo de cálculo proporcional
+                realToHour: Math.floor(excelData.totalPlanned * 0.35),   // Exemplo de cálculo proporcional
+                delta: Math.floor(excelData.totalPlanned * -0.05),      // Exemplo de cálculo proporcional
+                totalAvailable: kitData.totalAvailable,
+                isLoading: false,
+              }
+            }));
+          } catch (error) {
+            console.error("Erro ao carregar dados Montagem Kit:", error);
+            setSummaryData(prev => ({
+              ...prev,
+              [k]: {
+                ...prev[k],
+                isLoading: false,
+              }
+            }));
+          }
         } else {
           // Simulate network delay for mock data
           const randomDelay = 500 + Math.random() * 1500;
