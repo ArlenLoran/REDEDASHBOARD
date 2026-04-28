@@ -11,6 +11,7 @@ import SummaryView from './components/SummaryView';
 import DetailedView from './components/DetailedView';
 import { MOCK_SUMMARY_DATA } from './constants';
 import { fetchApiData, fetchKitData } from './services/apiService';
+import { fetchPlannedKitValue } from './services/excelService';
 import { hasSpContext } from './services/sharepoint';
 import { Activity } from 'lucide-react';
 import { ensureConfigList, getAppConfig, acquireLock, releaseLock, updateApiCache, AppConfig, getSaoPauloDate } from './services/configService';
@@ -21,7 +22,11 @@ export default function App() {
     const cached = localStorage.getItem('cockpit_summary_data');
     if (cached) {
       try {
-        return JSON.parse(cached);
+        const parsed = JSON.parse(cached);
+        Object.keys(parsed).forEach(k => {
+          if (parsed[k]) parsed[k].isLoading = false;
+        });
+        return parsed;
       } catch (e) {
         return MOCK_SUMMARY_DATA;
       }
@@ -69,7 +74,7 @@ export default function App() {
 
   const API_KEYS = ['Teste API', 'MONTAGEM KIT'];
 
-  const updateStateWithCalculatedResults = (results: { teste?: any; kit?: any }) => {
+  const updateStateWithCalculatedResults = (results: { teste?: any; kit?: any; kitPlanned?: number }) => {
     addLog(`Atualizando estado com: ${JSON.stringify(results)}`);
     setSummaryData(prev => {
       const next = { ...prev };
@@ -94,6 +99,10 @@ export default function App() {
           totalAvailable: totalDisp,
           isLoading: false,
         };
+        
+        if (results.kitPlanned !== undefined) {
+          next['MONTAGEM KIT'].plannedDay = results.kitPlanned;
+        }
       }
 
       localStorage.setItem('cockpit_summary_data', JSON.stringify(next));
@@ -102,6 +111,7 @@ export default function App() {
   };
 
   const loadApiData = async (key?: string) => {
+    addLog(`loadApiData(key=${key || 'global'}) chamada.`);
     const keysToUpdate = (key ? [key] : Object.keys(summaryData))
       .filter(k => API_KEYS.includes(k) && !summaryData[k].isLoading);
 
@@ -132,9 +142,19 @@ export default function App() {
     try {
       if (hasSpContext()) {
         addLog("Buscando configurações no SharePoint...");
-        const config = await withTimeout(getAppConfig(), 8000);
+        let config = await withTimeout(getAppConfig(), 8000).catch(e => {
+          addLog(`Erro ao buscar config: ${String(e)}`, 'error');
+          return null;
+        });
         
+        if (!config) {
+          addLog("Configuração não encontrada no SP, tentando forçar criação...");
+          await ensureConfigList();
+          config = await getAppConfig();
+        }
+
         if (config) {
+          addLog(`Configuração SP ativa (ID: ${config.id}).`);
           const last = new Date(config.lastUpdate);
           const now = new Date();
           const diffSeconds = (now.getTime() - last.getTime()) / 1000;
@@ -182,10 +202,15 @@ export default function App() {
 
           if (locked) {
             try {
-              addLog("Trava obtida. Buscando dados externos...");
-              const [apiData, kitData] = await Promise.all([
-                withTimeout(fetchApiData(), 12000),
-                withTimeout(fetchKitData(), 12000)
+              if (!config.apiUrl) {
+                addLog("AVISO: URL da API não está preenchida na lista SharePoint (ConfiguracoesApp).", "error");
+                // Allow fallback to env var if available
+              }
+              addLog(`Buscando dados externos do servidor...`);
+              const [apiData, kitData, kitPlanned] = await Promise.all([
+                withTimeout(fetchApiData(config.apiUrl), 12000),
+                withTimeout(fetchKitData(config.apiUrl), 12000),
+                fetchPlannedKitValue()
               ]);
 
               const rawApi = Array.isArray(apiData) ? apiData : ((apiData as any)?.value || []);
@@ -204,7 +229,7 @@ export default function App() {
                 kit: JSON.stringify(kitCalculated)
               }), 8000);
 
-              updateStateWithCalculatedResults({ teste: testeCalculated, kit: kitCalculated });
+              updateStateWithCalculatedResults({ teste: testeCalculated, kit: kitCalculated, kitPlanned });
               
               if (!key) {
                 setLastUpdateTime(new Date());
@@ -236,19 +261,25 @@ export default function App() {
       }
 
       // Default logic (Non-SP or fallback)
-      addLog("Buscando APIs diretamente...");
+      addLog(`Fallback: Buscando APIs diretamente para ${keysToUpdate.join(', ')}...`);
       const updatePromises = keysToUpdate.map(async (k) => {
         try {
+          addLog(`Iniciando fetch direto para ${k}...`);
           if (k === 'Teste API') {
-            const rawData = await withTimeout(fetchApiData(), 12000);
+            const rawData = await withTimeout(fetchApiData(), 15000);
+            addLog(`Dados Teste API recebidos: ${Array.isArray(rawData) ? rawData.length : 'objeto'} itens.`);
             const apiResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
             const totalQtd = apiResults.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0);
             updateStateWithCalculatedResults({ teste: { totalQtd } });
           } else if (k === 'MONTAGEM KIT') {
-            const rawData = await withTimeout(fetchKitData(), 12000);
+            const [rawData, kitPlanned] = await Promise.all([
+              withTimeout(fetchKitData(), 15000),
+              fetchPlannedKitValue()
+            ]);
+            addLog(`Dados Montagem Kit recebidos: ${Array.isArray(rawData) ? rawData.length : 'objeto'} itens.`);
             const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
             const totalDisp = kitResults.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0);
-            updateStateWithCalculatedResults({ kit: { totalDisp } });
+            updateStateWithCalculatedResults({ kit: { totalDisp }, kitPlanned });
           }
         } catch (err) {
           addLog(`Erro em ${k}: ${String(err)}`, 'error');
@@ -277,15 +308,22 @@ export default function App() {
 
   useEffect(() => {
     const initSpAndData = async () => {
+      addLog("Iniciando Sistema...");
       if (hasSpContext()) {
         try {
+          addLog("Verificando Listas SharePoint...");
           await ensureConfigList();
+          addLog("Listas verificadas/criadas.");
           const config = await getAppConfig();
           if (config) {
+            addLog(`Configuração carregada. Intervalo: ${config.intervalMinutes}min`);
             setConfigItemId(config.id);
             setAutoRefreshInterval(config.intervalMinutes);
+          } else {
+            addLog("Aviso: Configuração não encontrada após inicialização.", "error");
           }
         } catch (err) {
+          addLog(`Erro crítico na inicialização SP: ${String(err)}`, "error");
           console.error("SharePoint init failed", err);
         }
       }
@@ -367,11 +405,18 @@ export default function App() {
       case 'MONTAGEM KIT':
       case 'CQ':
       case 'EXPEDIÇÃO':
+        const metric = summaryData[activeTab];
         return (
           <DetailedView 
             title={activeTab} 
             metrics={[
-              { label: 'PADRÃO', plannedDay: 3860, plannedToHour: 1178, realToHour: 1300, delta: 122 },
+              { 
+                label: 'PADRÃO', 
+                plannedDay: metric.plannedDay, 
+                plannedToHour: metric.plannedToHour, 
+                realToHour: metric.realToHour, 
+                delta: metric.delta 
+              },
             ]}
           />
         );

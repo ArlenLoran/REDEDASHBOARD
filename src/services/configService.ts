@@ -20,6 +20,7 @@ const COL_CACHE_KIT = 'CacheMontagemKit';
 const COL_STATUS = 'StatusAtualizacao';
 const COL_USER = 'UsuarioAtualizacao';
 const COL_LOCK_TIME = 'DataTrava';
+const COL_API_URL = 'URL_da_API';
 
 export interface AppConfig {
   id: number;
@@ -30,6 +31,7 @@ export interface AppConfig {
   lockTime: string;
   cacheTeste: string;
   cacheKit: string;
+  apiUrl: string;
 }
 
 export function getSaoPauloDate(): Date {
@@ -62,7 +64,8 @@ export async function ensureConfigList(): Promise<void> {
     spListEnsureMultiLineTextField(LIST_NAME, COL_CACHE_KIT),
     spListEnsureTextField(LIST_NAME, COL_STATUS),
     spListEnsureTextField(LIST_NAME, COL_USER),
-    spListEnsureTextField(LIST_NAME, COL_LOCK_TIME)
+    spListEnsureTextField(LIST_NAME, COL_LOCK_TIME),
+    spListEnsureTextField(LIST_NAME, COL_API_URL)
   ]);
 
   // Check if we have an item, if not create one
@@ -75,7 +78,8 @@ export async function ensureConfigList(): Promise<void> {
       [COL_INTERVAL]: 5,
       [COL_STATUS]: 'LIVRE',
       [COL_USER]: '',
-      [COL_LOCK_TIME]: ''
+      [COL_LOCK_TIME]: '',
+      [COL_API_URL]: import.meta.env.VITE_API_URL || ''
     });
   }
 }
@@ -84,7 +88,7 @@ export async function getAppConfig(): Promise<AppConfig | null> {
   if (!hasSpContext()) return null;
 
   const res = await spListGetItems<any>(LIST_NAME, {
-    select: ['Id', COL_DATE, COL_INTERVAL, COL_STATUS, COL_USER, COL_LOCK_TIME, COL_CACHE_TESTE, COL_CACHE_KIT]
+    select: ['Id', COL_DATE, COL_INTERVAL, COL_STATUS, COL_USER, COL_LOCK_TIME, COL_CACHE_TESTE, COL_CACHE_KIT, COL_API_URL]
   });
 
   if (res.status && res.data.length > 0) {
@@ -97,7 +101,8 @@ export async function getAppConfig(): Promise<AppConfig | null> {
       lockUser: item[COL_USER] || '',
       lockTime: item[COL_LOCK_TIME] || '',
       cacheTeste: item[COL_CACHE_TESTE] || '',
-      cacheKit: item[COL_CACHE_KIT] || ''
+      cacheKit: item[COL_CACHE_KIT] || '',
+      apiUrl: item[COL_API_URL] || ''
     };
   }
   return null;

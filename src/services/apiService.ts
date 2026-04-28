@@ -1,11 +1,13 @@
 import { ApiResponseItem } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL;
+const DEFAULT_API_URL = import.meta.env.VITE_API_URL;
 
-function checkConfig() {
-  if (!API_URL) {
-    throw new Error("VITE_API_URL não configurado nas variáveis de ambiente.");
+function getUrl(override?: string) {
+  const url = override || DEFAULT_API_URL;
+  if (!url) {
+    throw new Error("API URL não configurado. Verifique as configurações no SharePoint ou variáveis de ambiente.");
   }
+  return url;
 }
 
 const QUERY = `
@@ -57,15 +59,15 @@ usr_id
 fetch first 10 rows only
 `;
 
-export async function fetchApiData(): Promise<ApiResponseItem[]> {
+export async function fetchApiData(urlOverride?: string): Promise<ApiResponseItem[]> {
+  const url = getUrl(urlOverride);
   const body = {
     query: QUERY,
     id_score: "recebimentos_rdts"
   };
 
-  checkConfig();
   try {
-    const response = await fetch(API_URL, {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -74,7 +76,7 @@ export async function fetchApiData(): Promise<ApiResponseItem[]> {
     });
 
     if (!response.ok) {
-      throw new Error(`Erro: ${response.status} ao acessar ${API_URL}`);
+      throw new Error(`Erro: ${response.status} ao acessar ${url}`);
     }
 
     const data = await response.json();
@@ -85,7 +87,7 @@ export async function fetchApiData(): Promise<ApiResponseItem[]> {
   }
 }
 
-export async function fetchKitData(): Promise<any[]> {
+export async function fetchKitData(urlOverride?: string): Promise<any[]> {
   const KIT_QUERY = `
 SELECT 
     TRUNC(trndte) data,
@@ -139,9 +141,9 @@ GROUP BY
     id_score: "recebimentos_rdts"
   };
 
-  checkConfig();
+  const url = getUrl(urlOverride);
   try {
-    const response = await fetch(API_URL, {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -150,7 +152,7 @@ GROUP BY
     });
 
     if (!response.ok) {
-      throw new Error(`Erro: ${response.status} ao acessar ${API_URL}`);
+      throw new Error(`Erro: ${response.status} ao acessar ${url}`);
     }
 
     const data = await response.json();
