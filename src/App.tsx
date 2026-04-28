@@ -17,7 +17,9 @@ import { ensureConfigList, getAppConfig, updateLastUpdate } from './services/con
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('RESUMO');
   const [summaryData, setSummaryData] = useState<Record<string, SummaryMetric>>(MOCK_SUMMARY_DATA);
-  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(5); // Default to 5 mins
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(() => {
+    return Number(import.meta.env.VITE_DEFAULT_REFRESH_MINUTES) || 5;
+  });
   const [configItemId, setConfigItemId] = useState<number | null>(null);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState<number | null>(null);
@@ -25,7 +27,7 @@ export default function App() {
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
 
-  const loadApiData = async (key?: string) => {
+  const loadApiData = async (key?: string, options: { skipTimestampUpdate?: boolean } = {}) => {
     // Only refresh keys that are not already loading
     const keysToUpdate = (key ? [key] : Object.keys(summaryData))
       .filter(k => !summaryData[k].isLoading);
@@ -45,9 +47,10 @@ export default function App() {
     const updatePromises = keysToUpdate.map(async (k) => {
       try {
         if (k === 'Teste API') {
-          const apiResults = await fetchApiData();
-          const totalQtd = apiResults.reduce((acc, item: any) => {
-            const val = item.QTD || item.qtd || 0;
+          const rawData = await fetchApiData();
+          const apiResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
+          const totalQtd = apiResults.reduce((acc: number, item: any) => {
+            const val = item.QTD ?? item.qtd ?? 0;
             return acc + Number(val);
           }, 0);
 
@@ -60,14 +63,14 @@ export default function App() {
               realToHour: Math.floor(totalQtd * 0.45),
               delta: Math.floor(totalQtd * 0.05),
               totalAvailable: totalQtd,
-              deltaProduction: 10,
               isLoading: false,
             }
           }));
         } else if (k === 'MONTAGEM KIT') {
-          const kitResults = await fetchKitData();
-          const totalDisp = kitResults.reduce((acc, item: any) => {
-            const val = item.QUANTIDADE || item.quantidade || 0;
+          const rawData = await fetchKitData();
+          const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
+          const totalDisp = kitResults.reduce((acc: number, item: any) => {
+            const val = item.QUANTIDADE ?? item.quantidade ?? 0;
             return acc + Number(val);
           }, 0);
 
@@ -98,17 +101,17 @@ export default function App() {
       }
     });
 
-    // If it's a full refresh, update the timestamps when all started ones are tracked
-    // Actually, we can update the "Last Update" time immediately for the overview,
-    // and individuals as they finish.
+    // If it's a full refresh, update the timestamps
     if (!key) {
-      setLastUpdateTime(new Date());
-      if (autoRefreshInterval > 0) {
-        setSecondsUntilRefresh(autoRefreshInterval * 60);
-      }
-      // If we are in SharePoint, update the list 
-      if (configItemId !== null) {
-        updateLastUpdate(configItemId).catch(err => console.error("Failed to update SP timestamp", err));
+      if (!options.skipTimestampUpdate) {
+        setLastUpdateTime(new Date());
+        if (autoRefreshInterval > 0) {
+          setSecondsUntilRefresh(autoRefreshInterval * 60);
+        }
+        // If we are in SharePoint, update the list 
+        if (configItemId !== null) {
+          updateLastUpdate(configItemId).catch(err => console.error("Failed to update SP timestamp", err));
+        }
       }
     }
 
@@ -116,25 +119,52 @@ export default function App() {
   };
 
   useEffect(() => {
-    const initSp = async () => {
+    const initSpAndData = async () => {
+      let skipTimestampUpdate = false;
+      let storedLastUpdate = new Date();
+      let remainingRefreshSeconds: number | null = null;
+      let spConfigId: number | null = null;
+      let spInterval = Number(import.meta.env.VITE_DEFAULT_REFRESH_MINUTES) || 5;
+
       if (hasSpContext()) {
         try {
           await ensureConfigList();
           const config = await getAppConfig();
           if (config) {
-            setAutoRefreshInterval(config.intervalMinutes);
-            setConfigItemId(config.id);
-            // If we have a stored last update, we could sync it, 
-            // but usually we want to start fresh or just display it.
+            spConfigId = config.id;
+            spInterval = config.intervalMinutes;
+            
+            const last = new Date(config.lastUpdate);
+            const now = new Date();
+            const diffSeconds = (now.getTime() - last.getTime()) / 1000;
+            const intervalSeconds = config.intervalMinutes * 60;
+
+            if (diffSeconds < intervalSeconds && diffSeconds >= 0) {
+              skipTimestampUpdate = true;
+              storedLastUpdate = last;
+              remainingRefreshSeconds = Math.ceil(intervalSeconds - diffSeconds);
+            }
+            
+            setAutoRefreshInterval(spInterval);
+            setConfigItemId(spConfigId);
           }
         } catch (err) {
           console.error("SharePoint init failed", err);
         }
       }
+
+      // Load initial data
+      await loadApiData(undefined, { skipTimestampUpdate });
+      
+      // If we skipped the standard update because we have a valid SP timestamp,
+      // apply the stored values now to sync the UI correctly.
+      if (skipTimestampUpdate) {
+        setLastUpdateTime(storedLastUpdate);
+        setSecondsUntilRefresh(remainingRefreshSeconds);
+      }
     };
 
-    initSp();
-    loadApiData();
+    initSpAndData();
   }, []);
 
   useEffect(() => {
@@ -172,10 +202,7 @@ export default function App() {
           <SummaryView 
             onNavigate={setActiveTab} 
             data={summaryData} 
-            onReloadOne={loadApiData}
-            onReloadAll={() => loadApiData()}
             autoRefreshInterval={autoRefreshInterval}
-            onAutoRefreshChange={setAutoRefreshInterval}
             lastUpdateTime={lastUpdateTime}
             secondsUntilRefresh={secondsUntilRefresh}
           />

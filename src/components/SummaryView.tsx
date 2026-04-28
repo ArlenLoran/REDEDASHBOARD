@@ -6,10 +6,7 @@ import { MOCK_SUMMARY_DATA, COLORS } from '../constants';
 interface SummaryViewProps {
   onNavigate: (tab: DashboardTab) => void;
   data?: Record<string, SummaryMetric>;
-  onReloadOne: (key: string) => void;
-  onReloadAll: () => void;
   autoRefreshInterval: number;
-  onAutoRefreshChange: (interval: number) => void;
   lastUpdateTime: Date;
   secondsUntilRefresh: number | null;
 }
@@ -17,10 +14,9 @@ interface SummaryViewProps {
 interface SummaryCardProps {
   metric: SummaryMetric;
   onClick: () => void;
-  onReload: () => void;
 }
 
-const SummaryCard: React.FC<SummaryCardProps> = ({ metric, onClick, onReload }) => {
+const SummaryCard: React.FC<SummaryCardProps> = ({ metric, onClick }) => {
   const isPositiveDelta = metric.delta >= 0;
 
   return (
@@ -36,18 +32,6 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ metric, onClick, onReload }) 
             {metric.title}
           </span>
         </div>
-        <button 
-          id={`refresh-${metric.title.toLowerCase().replace(/ \+ /g, '-').replace(/ /g, '-')}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onReload();
-          }}
-          disabled={metric.isLoading}
-          className="p-1 hover:bg-white/10 rounded-full transition-colors disabled:opacity-50"
-          title="Recarregar dados"
-        >
-          <RefreshCw size={14} className={`text-white ${metric.isLoading ? 'animate-spin' : ''}`} />
-        </button>
       </div>
 
       {/* Main Stat */}
@@ -113,10 +97,7 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ metric, onClick, onReload }) 
 export default function SummaryView({ 
   onNavigate, 
   data = MOCK_SUMMARY_DATA, 
-  onReloadOne, 
-  onReloadAll,
   autoRefreshInterval,
-  onAutoRefreshChange,
   lastUpdateTime,
   secondsUntilRefresh
 }: SummaryViewProps) {
@@ -160,30 +141,12 @@ export default function SummaryView({
         </div>
 
         <div className="flex items-center justify-between sm:justify-start gap-2 sm:gap-3">
-          <div className="flex items-center gap-2 bg-[#CCCCCC] px-3 py-1.5 rounded shadow-sm border border-gray-400 flex-1 sm:flex-none">
-            <span className="text-[10px] font-bold uppercase text-[#444] whitespace-nowrap">Auto:</span>
-            <select 
-              value={autoRefreshInterval}
-              onChange={(e) => onAutoRefreshChange(Number(e.target.value))}
-              className="bg-transparent text-[10px] font-bold uppercase border-none focus:ring-0 cursor-pointer p-0 w-full"
-            >
-              <option value={0}>NÃO</option>
-              <option value={1}>1M</option>
-              <option value={5}>5M</option>
-              <option value={15}>15M</option>
-              <option value={30}>30M</option>
-              <option value={60}>1H</option>
-            </select>
-          </div>
-
-          <button 
-            onClick={onReloadAll}
-            disabled={isAnyLoading}
-            className="flex items-center justify-center gap-2 bg-[#D35400] hover:bg-[#A04000] text-white px-3 sm:px-4 py-2 rounded shadow-md transition-all font-bold text-[10px] sm:text-xs uppercase disabled:opacity-50 flex-1 sm:flex-none"
-          >
-            <RefreshCw size={14} className={isAnyLoading ? 'animate-spin' : ''} />
-            <span className="whitespace-nowrap">Atualizar</span>
-          </button>
+          {isAnyLoading && (
+            <div className="flex items-center gap-1.5 bg-[#D35400]/10 px-3 py-1.5 rounded border border-[#D35400]/20">
+              <Loader2 size={14} className="animate-spin text-[#D35400]" />
+              <span className="text-[10px] font-bold text-[#D35400] uppercase tracking-wider">Carregando...</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -197,7 +160,6 @@ export default function SummaryView({
                   onNavigate(metric.title as DashboardTab);
               }
             }} 
-            onReload={() => onReloadOne(metric.title)}
           />
         ))}
       </div>

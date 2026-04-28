@@ -50,8 +50,8 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     totalAvailable: 3900,
     deltaProduction: 40,
   },
-  'CARGA DE APP': {
-    title: 'CARGA DE APP',
+  'CARGA APP + TRIAGEM': {
+    title: 'CARGA APP + TRIAGEM',
     plannedDay: 3860,
     plannedToHour: 1178,
     realToHour: 1300,
@@ -59,8 +59,17 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     totalAvailable: 3900,
     deltaProduction: 40,
   },
-  'SALA DE BATERIAS': {
-    title: 'SALA DE BATERIAS',
+  'SALA BATERIAS': {
+    title: 'SALA BATERIAS',
+    plannedDay: 3860,
+    plannedToHour: 1178,
+    realToHour: 1300,
+    delta: 122,
+    totalAvailable: 3900,
+    deltaProduction: 40,
+  },
+  'SEPARAÇÃO COMPONENTES': {
+    title: 'SEPARAÇÃO COMPONENTES',
     plannedDay: 3860,
     plannedToHour: 1178,
     realToHour: 1300,
