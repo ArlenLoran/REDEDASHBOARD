@@ -69,6 +69,21 @@ export default function App() {
   };
 
   const loadApiData = async (key?: string) => {
+    // Determine which keys we are updating
+    const keysToUpdate = (key ? [key] : Object.keys(summaryData))
+      .filter(k => !summaryData[k].isLoading);
+
+    if (keysToUpdate.length === 0) return;
+
+    // Set specified keys to loading
+    setSummaryData(prev => {
+      const next = { ...prev };
+      keysToUpdate.forEach(k => {
+        next[k] = { ...next[k], isLoading: true };
+      });
+      return next;
+    });
+
     // If we are in SharePoint, use centralized caching logic
     if (hasSpContext()) {
       const config = await getAppConfig();
@@ -94,6 +109,14 @@ export default function App() {
             if (config.cacheKit) results.kit = JSON.parse(config.cacheKit);
             if (Object.keys(results).length > 0) {
               updateStateWithCalculatedResults(results);
+              // Also ensure ANY other key that was loading is set to false
+              setSummaryData(prev => {
+                const updated = { ...prev };
+                keysToUpdate.forEach(k => {
+                  updated[k] = { ...updated[k], isLoading: false };
+                });
+                return updated;
+              });
               return;
             }
           } catch (e) {
@@ -102,7 +125,7 @@ export default function App() {
         }
 
         // We need to refresh (either because of timer or manual click)
-        const userMail = (window as any)._spPageContextInfo?.userEmail || 'Desconhecido';
+        const userMail = (window as any)._spPageContextInfo?.userEmail || "Desconhecido";
         const locked = await acquireLock(config.id, userMail);
 
         if (locked) {
@@ -114,36 +137,37 @@ export default function App() {
             const kitData = await fetchKitData();
             const rawKit = Array.isArray(kitData) ? kitData : ((kitData as any)?.value || []);
 
-            // CALCULATE AGGREGATES BEFORE SAVING
             const testeCalculated = {
               totalQtd: rawApi.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0)
             };
-
             const kitCalculated = {
               totalDisp: rawKit.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0)
             };
 
-            // Save small JSON to SharePoint
             await updateApiCache(config.id, {
               teste: JSON.stringify(testeCalculated),
               kit: JSON.stringify(kitCalculated)
             });
 
-            // Update local state
             updateStateWithCalculatedResults({ teste: testeCalculated, kit: kitCalculated });
             
             if (!key) {
               setLastUpdateTime(new Date());
               setSecondsUntilRefresh(config.intervalMinutes * 60);
             }
-
           } catch (err) {
             console.error("Refresh failed", err);
           } finally {
             await releaseLock(config.id);
+            // Ensure all loading states are cleared
+            setSummaryData(prev => {
+              const cleaned = { ...prev };
+              keysToUpdate.forEach(k => { cleaned[k].isLoading = false; });
+              return cleaned;
+            });
           }
         } else {
-          // Pull current cache
+          // Lock held, just pull current cache
           const freshConfig = await getAppConfig();
           if (freshConfig) {
             try {
@@ -153,25 +177,23 @@ export default function App() {
               updateStateWithCalculatedResults(res);
             } catch (e) { /* ignore */ }
           }
+          
+          // Set a shorter retry interval if someone else is currently updating
+          const retrySeconds = Number(import.meta.env.VITE_STUCK_LOCK_CHECK_SECONDS) || 30;
+          setSecondsUntilRefresh(retrySeconds);
+
+          // Reset loading state for cards
+          setSummaryData(prev => {
+            const next = { ...prev };
+            keysToUpdate.forEach(k => { next[k].isLoading = false; });
+            return next;
+          });
         }
         return;
       }
     }
 
     // Default logic (Non-SP)
-    const keysToUpdate = (key ? [key] : Object.keys(summaryData))
-      .filter(k => !summaryData[k].isLoading);
-
-    if (keysToUpdate.length === 0) return;
-
-    setSummaryData(prev => {
-      const next = { ...prev };
-      keysToUpdate.forEach(k => {
-        next[k] = { ...next[k], isLoading: true };
-      });
-      return next;
-    });
-
     const updatePromises = keysToUpdate.map(async (k) => {
       try {
         if (k === 'Teste API') {

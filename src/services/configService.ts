@@ -104,7 +104,8 @@ export async function acquireLock(id: number, userEmail: string): Promise<boolea
   const config = await getAppConfig();
   if (!config) return false;
 
-  const isExpired = config.lockTime ? (Date.now() - new Date(config.lockTime).getTime()) > 3 * 60 * 1000 : true;
+  const timeoutMinutes = Number(import.meta.env.VITE_LOCK_TIMEOUT_MINUTES) || 3;
+  const isExpired = config.lockTime ? (Date.now() - new Date(config.lockTime).getTime()) > timeoutMinutes * 60 * 1000 : true;
 
   if (config.status === 'LIVRE' || isExpired) {
     const res = await spListUpdateItem(LIST_NAME, id, {

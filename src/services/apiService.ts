@@ -1,6 +1,12 @@
 import { ApiResponseItem } from '../types';
 
-const API_URL = "https://51a805d34213e248a3506f5db8fe28.55.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/655aac37bdea49b1b1221a2f37198754/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=-2l0x4h5cwmpZ20RCIbMrzaR0860ka4aB8_dDOVQQHQ";
+const API_URL = import.meta.env.VITE_API_URL;
+
+function checkConfig() {
+  if (!API_URL) {
+    throw new Error("VITE_API_URL não configurado nas variáveis de ambiente.");
+  }
+}
 
 const QUERY = `
 select 
@@ -57,6 +63,7 @@ export async function fetchApiData(): Promise<ApiResponseItem[]> {
     id_score: "recebimentos_rdts"
   };
 
+  checkConfig();
   try {
     const response = await fetch(API_URL, {
       method: "POST",
@@ -67,7 +74,7 @@ export async function fetchApiData(): Promise<ApiResponseItem[]> {
     });
 
     if (!response.ok) {
-      throw new Error(`Erro: ${response.status}`);
+      throw new Error(`Erro: ${response.status} ao acessar ${API_URL}`);
     }
 
     const data = await response.json();
@@ -131,6 +138,7 @@ GROUP BY
     id_score: "recebimentos_rdts"
   };
 
+  checkConfig();
   try {
     const response = await fetch(API_URL, {
       method: "POST",
@@ -141,7 +149,7 @@ GROUP BY
     });
 
     if (!response.ok) {
-      throw new Error(`Erro: ${response.status}`);
+      throw new Error(`Erro: ${response.status} ao acessar ${API_URL}`);
     }
 
     const data = await response.json();
