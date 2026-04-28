@@ -84,151 +84,138 @@ export default function App() {
       return next;
     });
 
-    // If we are in SharePoint, use centralized caching logic
-    if (hasSpContext()) {
-      const config = await getAppConfig();
-      if (config) {
-        const last = new Date(config.lastUpdate);
-        const diffSeconds = (Date.now() - last.getTime()) / 1000;
-        const intervalSeconds = config.intervalMinutes * 60;
+    try {
+      // If we are in SharePoint, use centralized caching logic
+      if (hasSpContext()) {
+        const config = await getAppConfig();
+        if (config) {
+          const last = new Date(config.lastUpdate);
+          const diffSeconds = (Date.now() - last.getTime()) / 1000;
+          const intervalSeconds = config.intervalMinutes * 60;
 
-        // Sync local timers with SharePoint source of truth
-        if (!key) {
-          setLastUpdateTime(last);
-          const remaining = Math.max(0, Math.ceil(intervalSeconds - diffSeconds));
-          setSecondsUntilRefresh(remaining);
-        }
-
-        const isExpired = diffSeconds >= intervalSeconds || diffSeconds < 0;
-
-        // If time hasn't passed and it's not a manual refresh, just use the processed cache from columns
-        if (!key && !isExpired) {
-          try {
-            const results: any = {};
-            if (config.cacheTeste) results.teste = JSON.parse(config.cacheTeste);
-            if (config.cacheKit) results.kit = JSON.parse(config.cacheKit);
-            if (Object.keys(results).length > 0) {
-              updateStateWithCalculatedResults(results);
-              // Also ensure ANY other key that was loading is set to false
-              setSummaryData(prev => {
-                const updated = { ...prev };
-                keysToUpdate.forEach(k => {
-                  updated[k] = { ...updated[k], isLoading: false };
-                });
-                return updated;
-              });
-              return;
-            }
-          } catch (e) {
-            console.error("Failed to parse SP cache", e);
+          // Sync local timers with SharePoint source of truth
+          if (!key) {
+            setLastUpdateTime(last);
+            const remaining = Math.max(0, Math.ceil(intervalSeconds - diffSeconds));
+            setSecondsUntilRefresh(remaining);
           }
-        }
 
-        // We need to refresh (either because of timer or manual click)
-        const userMail = (window as any)._spPageContextInfo?.userEmail || "Desconhecido";
-        const locked = await acquireLock(config.id, userMail);
+          const isExpired = diffSeconds >= intervalSeconds || diffSeconds < 0;
 
-        if (locked) {
-          try {
-            // Fetch raw data
-            const apiData = await fetchApiData();
-            const rawApi = Array.isArray(apiData) ? apiData : ((apiData as any)?.value || []);
-            
-            const kitData = await fetchKitData();
-            const rawKit = Array.isArray(kitData) ? kitData : ((kitData as any)?.value || []);
-
-            const testeCalculated = {
-              totalQtd: rawApi.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0)
-            };
-            const kitCalculated = {
-              totalDisp: rawKit.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0)
-            };
-
-            await updateApiCache(config.id, {
-              teste: JSON.stringify(testeCalculated),
-              kit: JSON.stringify(kitCalculated)
-            });
-
-            updateStateWithCalculatedResults({ teste: testeCalculated, kit: kitCalculated });
-            
-            if (!key) {
-              setLastUpdateTime(new Date());
-              setSecondsUntilRefresh(config.intervalMinutes * 60);
-            }
-          } catch (err) {
-            console.error("Refresh failed", err);
-          } finally {
-            await releaseLock(config.id);
-            // Ensure all loading states are cleared
-            setSummaryData(prev => {
-              const cleaned = { ...prev };
-              keysToUpdate.forEach(k => { cleaned[k].isLoading = false; });
-              return cleaned;
-            });
-          }
-        } else {
-          // Lock held, just pull current cache
-          const freshConfig = await getAppConfig();
-          if (freshConfig) {
+          // If time hasn't passed and it's not a manual refresh, just use the processed cache from columns
+          if (!key && !isExpired) {
             try {
-              const res: any = {};
-              if (freshConfig.cacheTeste) res.teste = JSON.parse(freshConfig.cacheTeste);
-              if (freshConfig.cacheKit) res.kit = JSON.parse(freshConfig.cacheKit);
-              updateStateWithCalculatedResults(res);
-            } catch (e) { /* ignore */ }
+              const results: any = {};
+              if (config.cacheTeste) results.teste = JSON.parse(config.cacheTeste);
+              if (config.cacheKit) results.kit = JSON.parse(config.cacheKit);
+              if (Object.keys(results).length > 0) {
+                updateStateWithCalculatedResults(results);
+              }
+            } catch (e) {
+              console.error("Failed to parse SP cache", e);
+            }
+            return; // Cleanup is in finally block
           }
-          
-          // Set a shorter retry interval if someone else is currently updating
-          const retrySeconds = Number(import.meta.env.VITE_STUCK_LOCK_CHECK_SECONDS) || 30;
-          setSecondsUntilRefresh(retrySeconds);
 
-          // Reset loading state for cards
-          setSummaryData(prev => {
-            const next = { ...prev };
-            keysToUpdate.forEach(k => { next[k].isLoading = false; });
-            return next;
-          });
+          // We need to refresh (either because of timer or manual click)
+          const userMail = (window as any)._spPageContextInfo?.userEmail || "Desconhecido";
+          const locked = await acquireLock(config.id, userMail);
+
+          if (locked) {
+            try {
+              // Fetch raw data
+              const apiData = await fetchApiData();
+              const rawApi = Array.isArray(apiData) ? apiData : ((apiData as any)?.value || []);
+              
+              const kitData = await fetchKitData();
+              const rawKit = Array.isArray(kitData) ? kitData : ((kitData as any)?.value || []);
+
+              const testeCalculated = {
+                totalQtd: rawApi.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0)
+              };
+              const kitCalculated = {
+                totalDisp: rawKit.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0)
+              };
+
+              await updateApiCache(config.id, {
+                teste: JSON.stringify(testeCalculated),
+                kit: JSON.stringify(kitCalculated)
+              });
+
+              updateStateWithCalculatedResults({ teste: testeCalculated, kit: kitCalculated });
+              
+              if (!key) {
+                setLastUpdateTime(new Date());
+                setSecondsUntilRefresh(config.intervalMinutes * 60);
+              }
+            } catch (err) {
+              console.error("Refresh failed", err);
+            } finally {
+              await releaseLock(config.id);
+            }
+          } else {
+            // Lock held, just pull current cache
+            const freshConfig = await getAppConfig();
+            if (freshConfig) {
+              try {
+                const res: any = {};
+                if (freshConfig.cacheTeste) res.teste = JSON.parse(freshConfig.cacheTeste);
+                if (freshConfig.cacheKit) res.kit = JSON.parse(freshConfig.cacheKit);
+                updateStateWithCalculatedResults(res);
+              } catch (e) { /* ignore */ }
+            }
+            
+            // Set a shorter retry interval if someone else is currently updating
+            const retrySeconds = Number(import.meta.env.VITE_STUCK_LOCK_CHECK_SECONDS) || 30;
+            setSecondsUntilRefresh(retrySeconds);
+          }
+          return; // Cleanup is in finally block
         }
-        return;
       }
-    }
 
-    // Default logic (Non-SP)
-    const updatePromises = keysToUpdate.map(async (k) => {
-      try {
-        if (k === 'Teste API') {
-          const rawData = await fetchApiData();
-          const apiResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
-          const totalQtd = apiResults.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0);
-          updateStateWithCalculatedResults({ teste: { totalQtd } });
-        } else if (k === 'MONTAGEM KIT') {
-          const rawData = await fetchKitData();
-          const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
-          const totalDisp = kitResults.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0);
-          updateStateWithCalculatedResults({ kit: { totalDisp } });
-        } else {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          setSummaryData(prev => ({
-            ...prev,
-            [k]: { ...prev[k], isLoading: false }
-          }));
+      // Default logic (Non-SP or fallback if config not found)
+      const updatePromises = keysToUpdate.map(async (k) => {
+        try {
+          if (k === 'Teste API') {
+            const rawData = await fetchApiData();
+            const apiResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
+            const totalQtd = apiResults.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0);
+            updateStateWithCalculatedResults({ teste: { totalQtd } });
+          } else if (k === 'MONTAGEM KIT') {
+            const rawData = await fetchKitData();
+            const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
+            const totalDisp = kitResults.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0);
+            updateStateWithCalculatedResults({ kit: { totalDisp } });
+          } else {
+            // Mock cards: clear loading state after a small delay
+            await new Promise(resolve => setTimeout(resolve, 800));
+          }
+        } catch (err) {
+          console.error(`Failed to load data for ${k}`, err);
         }
-      } catch (err) {
-        console.error(`Failed to load data for ${k}`, err);
-        setSummaryData(prev => ({
-          ...prev,
-          [k]: { ...prev[k], isLoading: false }
-        }));
-      }
-    });
+      });
 
-    await Promise.all(updatePromises);
-    
-    if (!key) {
-      setLastUpdateTime(new Date());
-      if (autoRefreshInterval > 0) {
-        setSecondsUntilRefresh(autoRefreshInterval * 60);
+      await Promise.all(updatePromises);
+      
+      if (!key) {
+        setLastUpdateTime(new Date());
+        if (autoRefreshInterval > 0) {
+          setSecondsUntilRefresh(autoRefreshInterval * 60);
+        }
       }
+    } catch (error) {
+      console.error("Global load error", error);
+    } finally {
+      // Ensure ALL loading states are cleared regardless of path
+      setSummaryData(prev => {
+        const next = { ...prev };
+        keysToUpdate.forEach(k => {
+          if (next[k]) {
+            next[k] = { ...next[k], isLoading: false };
+          }
+        });
+        return next;
+      });
     }
   };
 

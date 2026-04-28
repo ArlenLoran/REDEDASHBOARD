@@ -156,7 +156,16 @@ export default function SummaryView({
             key={metric.title} 
             metric={metric} 
             onClick={() => {
-              if (metric.title === 'RECEBIMENTO' || metric.title === 'CATALOGAÇÃO' || metric.title === 'CARGA APP + TRIAGEM' || metric.title === 'CQ' || metric.title === 'EXPEDIÇÃO') {
+              const navigateTabs = [
+                'RECEBIMENTO', 
+                'CATALOGAÇÃO', 
+                'CARGA APP + TRIAGEM', 
+                'SALA BATERIAS', 
+                'SEPARAÇÃO COMPONENTES', 
+                'CQ', 
+                'EXPEDIÇÃO'
+              ];
+              if (navigateTabs.includes(metric.title)) {
                   onNavigate(metric.title as DashboardTab);
               }
             }} 
