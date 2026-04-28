@@ -16,7 +16,17 @@ import { ensureConfigList, getAppConfig, updateLastUpdate } from './services/con
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('RESUMO');
-  const [summaryData, setSummaryData] = useState<Record<string, SummaryMetric>>(MOCK_SUMMARY_DATA);
+  const [summaryData, setSummaryData] = useState<Record<string, SummaryMetric>>(() => {
+    const cached = localStorage.getItem('cockpit_summary_data');
+    if (cached) {
+      try {
+        return JSON.parse(cached);
+      } catch (e) {
+        return MOCK_SUMMARY_DATA;
+      }
+    }
+    return MOCK_SUMMARY_DATA;
+  });
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(() => {
     return Number(import.meta.env.VITE_DEFAULT_REFRESH_MINUTES) || 5;
   });
@@ -43,9 +53,12 @@ export default function App() {
       return next;
     });
 
+    let newSummaryData = { ...summaryData };
+
     // Create a list of update promises
     const updatePromises = keysToUpdate.map(async (k) => {
       try {
+        let updatedMetric: SummaryMetric;
         if (k === 'Teste API') {
           const rawData = await fetchApiData();
           const apiResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
@@ -54,18 +67,15 @@ export default function App() {
             return acc + Number(val);
           }, 0);
 
-          setSummaryData(prev => ({
-            ...prev,
-            [k]: {
-              ...prev[k],
-              plannedDay: totalQtd,
-              plannedToHour: Math.floor(totalQtd * 0.4),
-              realToHour: Math.floor(totalQtd * 0.45),
-              delta: Math.floor(totalQtd * 0.05),
-              totalAvailable: totalQtd,
-              isLoading: false,
-            }
-          }));
+          updatedMetric = {
+            ...summaryData[k],
+            plannedDay: totalQtd,
+            plannedToHour: Math.floor(totalQtd * 0.4),
+            realToHour: Math.floor(totalQtd * 0.45),
+            delta: Math.floor(totalQtd * 0.05),
+            totalAvailable: totalQtd,
+            isLoading: false,
+          };
         } else if (k === 'MONTAGEM KIT') {
           const rawData = await fetchKitData();
           const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
@@ -74,35 +84,42 @@ export default function App() {
             return acc + Number(val);
           }, 0);
 
-          setSummaryData(prev => ({
-            ...prev,
-            [k]: {
-              ...prev[k],
-              totalAvailable: totalDisp,
-              isLoading: false,
-            }
-          }));
+          updatedMetric = {
+            ...summaryData[k],
+            totalAvailable: totalDisp,
+            isLoading: false,
+          };
         } else {
           // Simulate network delay for mock data
           const randomDelay = 500 + Math.random() * 1500;
           await new Promise(resolve => setTimeout(resolve, randomDelay));
-          
-          setSummaryData(prev => ({
-            ...prev,
-            [k]: { ...prev[k], isLoading: false }
-          }));
+          updatedMetric = { ...summaryData[k], isLoading: false };
         }
+
+        setSummaryData(prev => {
+          const next = { ...prev, [k]: updatedMetric };
+          if (!key) { // If it's a full refresh, we'll save at the end
+            newSummaryData = next;
+          } else {
+            localStorage.setItem('cockpit_summary_data', JSON.stringify(next));
+          }
+          return next;
+        });
       } catch (err) {
         console.error(`Failed to load data for ${k}`, err);
-        setSummaryData(prev => ({
-          ...prev,
-          [k]: { ...prev[k], isLoading: false }
-        }));
+        setSummaryData(prev => {
+          const next = { ...prev, [k]: { ...prev[k], isLoading: false } };
+          return next;
+        });
       }
     });
 
+    await Promise.all(updatePromises);
+
     // If it's a full refresh, update the timestamps
     if (!key) {
+      localStorage.setItem('cockpit_summary_data', JSON.stringify(newSummaryData));
+
       if (!options.skipTimestampUpdate) {
         setLastUpdateTime(new Date());
         if (autoRefreshInterval > 0) {
@@ -114,15 +131,13 @@ export default function App() {
         }
       }
     }
-
-    await Promise.all(updatePromises);
   };
 
   useEffect(() => {
     const initSpAndData = async () => {
-      let skipTimestampUpdate = false;
-      let storedLastUpdate = new Date();
-      let remainingRefreshSeconds: number | null = null;
+      let skipInitialFetch = false;
+      let syncStoredLastUpdate = new Date();
+      let syncRemainingSeconds: number | null = null;
       let spConfigId: number | null = null;
       let spInterval = Number(import.meta.env.VITE_DEFAULT_REFRESH_MINUTES) || 5;
 
@@ -139,10 +154,12 @@ export default function App() {
             const diffSeconds = (now.getTime() - last.getTime()) / 1000;
             const intervalSeconds = config.intervalMinutes * 60;
 
-            if (diffSeconds < intervalSeconds && diffSeconds >= 0) {
-              skipTimestampUpdate = true;
-              storedLastUpdate = last;
-              remainingRefreshSeconds = Math.ceil(intervalSeconds - diffSeconds);
+            // If time hasn't passed and we have cached data, skip the fetch on mount
+            const hasCache = !!localStorage.getItem('cockpit_summary_data');
+            if (diffSeconds < intervalSeconds && diffSeconds >= 0 && hasCache) {
+              skipInitialFetch = true;
+              syncStoredLastUpdate = last;
+              syncRemainingSeconds = Math.ceil(intervalSeconds - diffSeconds);
             }
             
             setAutoRefreshInterval(spInterval);
@@ -153,14 +170,13 @@ export default function App() {
         }
       }
 
-      // Load initial data
-      await loadApiData(undefined, { skipTimestampUpdate });
-      
-      // If we skipped the standard update because we have a valid SP timestamp,
-      // apply the stored values now to sync the UI correctly.
-      if (skipTimestampUpdate) {
-        setLastUpdateTime(storedLastUpdate);
-        setSecondsUntilRefresh(remainingRefreshSeconds);
+      if (!skipInitialFetch) {
+        // Load fresh data
+        await loadApiData();
+      } else {
+        // Just sync timers with SharePoint
+        setLastUpdateTime(syncStoredLastUpdate);
+        setSecondsUntilRefresh(syncRemainingSeconds);
       }
     };
 
