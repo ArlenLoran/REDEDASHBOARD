@@ -79,9 +79,25 @@ export default function App() {
   };
 
   const loadApiData = async (key?: string) => {
-    // Only update keys that are actually APIs
+    // Determine which keys we are updating
+    // If a key is passed, we only update that one (if it's an API key)
+    // If no key is passed, we update all API keys
     const keysToUpdate = (key ? [key] : Object.keys(summaryData))
       .filter(k => API_KEYS.includes(k) && !summaryData[k].isLoading);
+
+    // If we're updating all (initial load/timer), we want to make sure
+    // mock cards are definitely NOT in loading state
+    if (!key) {
+      setSummaryData(prev => {
+        const next = { ...prev };
+        Object.keys(next).forEach(k => {
+          if (!API_KEYS.includes(k)) {
+            next[k] = { ...next[k], isLoading: false };
+          }
+        });
+        return next;
+      });
+    }
 
     if (keysToUpdate.length === 0) return;
 
@@ -120,28 +136,42 @@ export default function App() {
               const results: any = {};
               if (config.cacheTeste) results.teste = JSON.parse(config.cacheTeste);
               if (config.cacheKit) results.kit = JSON.parse(config.cacheKit);
-              if (Object.keys(results).length > 0) {
+              
+              if (results.teste || results.kit) {
                 updateStateWithCalculatedResults(results);
+                addLog("Dados carregados do cache do SharePoint");
+              } else {
+                addLog("Cache do SharePoint vazio, forçando atualização");
+                // If cache is empty, we act as if it's expired
+                throw new Error("EMPTY_CACHE");
               }
             } catch (e) {
-              addLog(`Erro ao processar cache: ${String(e)}`, 'error');
-              console.error("Failed to parse SP cache", e);
+              if (e instanceof Error && e.message === "EMPTY_CACHE") {
+                // proceed to update
+              } else {
+                addLog(`Erro ao processar cache: ${String(e)}`, 'error');
+                console.error("Failed to parse SP cache", e);
+              }
             }
-            return; // Cleanup is in finally block
+            if (!(isExpired || (key && API_KEYS.includes(key)))) return;
           }
 
           // We need to refresh (either because of timer or manual click)
           const userMail = (window as any)._spPageContextInfo?.userEmail || "Desconhecido";
+          addLog(`Tentando obter trava para atualização (${userMail})...`);
           const locked = await acquireLock(config.id, userMail);
 
           if (locked) {
             try {
+              addLog("Trava obtida. Buscando dados das APIs...");
               // Fetch raw data
               const apiData = await fetchApiData();
               const rawApi = Array.isArray(apiData) ? apiData : ((apiData as any)?.value || []);
               
               const kitData = await fetchKitData();
               const rawKit = Array.isArray(kitData) ? kitData : ((kitData as any)?.value || []);
+
+              addLog(`Dados recebidos. Teste: ${rawApi.length} itens. Kit: ${rawKit.length} itens.`);
 
               const testeCalculated = {
                 totalQtd: rawApi.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0)
@@ -150,6 +180,7 @@ export default function App() {
                 totalDisp: rawKit.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0)
               };
 
+              addLog("Calculando agregados e salvando no SharePoint...");
               await updateApiCache(config.id, {
                 teste: JSON.stringify(testeCalculated),
                 kit: JSON.stringify(kitCalculated)
@@ -161,14 +192,16 @@ export default function App() {
                 setLastUpdateTime(new Date());
                 setSecondsUntilRefresh(config.intervalMinutes * 60);
               }
-              addLog("Dados atualizados com sucesso via API");
+              addLog("Atualização SharePoint concluída com sucesso");
             } catch (err) {
-              addLog(`Erro no processo de atualização: ${String(err)}`, 'error');
+              addLog(`Erro durante processamento API: ${String(err)}`, 'error');
               console.error("Refresh failed", err);
             } finally {
               await releaseLock(config.id);
+              addLog("Trava do SharePoint liberada");
             }
           } else {
+            addLog("Outro usuário está atualizando no momento. Lendo cache atual...");
             // Lock held, just pull current cache
             const freshConfig = await getAppConfig();
             if (freshConfig) {
@@ -184,11 +217,12 @@ export default function App() {
             const retrySeconds = Number(import.meta.env.VITE_STUCK_LOCK_CHECK_SECONDS) || 30;
             setSecondsUntilRefresh(retrySeconds);
           }
-          return; // Cleanup is in finally block
+          return;
         }
       }
 
       // Default logic (Non-SP or fallback if config not found)
+      addLog("Modo padrão/fallback: atualizando APIs diretamente");
       const updatePromises = keysToUpdate.map(async (k) => {
         try {
           if (k === 'Teste API') {
@@ -201,11 +235,9 @@ export default function App() {
             const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
             const totalDisp = kitResults.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0);
             updateStateWithCalculatedResults({ kit: { totalDisp } });
-          } else {
-            // Mock cards: clear loading state after a small delay
-            await new Promise(resolve => setTimeout(resolve, 800));
           }
         } catch (err) {
+          addLog(`Erro ao carregar ${k}: ${String(err)}`, 'error');
           console.error(`Failed to load data for ${k}`, err);
         }
       });
@@ -218,12 +250,12 @@ export default function App() {
           setSecondsUntilRefresh(autoRefreshInterval * 60);
         }
       }
-      addLog("Ciclo de atualização concluído");
+      addLog("Atualização concluída");
     } catch (error) {
-      addLog(`Erro global de carregamento: ${String(error)}`, 'error');
+      addLog(`Erro Crítico: ${String(error)}`, 'error');
       console.error("Global load error", error);
     } finally {
-      // Ensure ALL loading states are cleared regardless of path
+      // Definitive cleanup of ALL loading states for affected keys
       setSummaryData(prev => {
         const next = { ...prev };
         keysToUpdate.forEach(k => {
@@ -231,6 +263,12 @@ export default function App() {
             next[k] = { ...next[k], isLoading: false };
           }
         });
+        // Extra safeguard: if it was a global refresh, clear all loading
+        if (!key) {
+           Object.keys(next).forEach(k => {
+             next[k].isLoading = false;
+           });
+        }
         return next;
       });
     }
