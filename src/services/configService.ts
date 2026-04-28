@@ -32,6 +32,16 @@ export interface AppConfig {
   cacheKit: string;
 }
 
+export function getSaoPauloDate(): Date {
+  const now = new Date();
+  const spOffset = -3; // UTC-3
+  return new Date(now.getTime() + (spOffset * 60 * 60 * 1000));
+}
+
+function getSaoPauloISOString(): string {
+  return getSaoPauloDate().toISOString();
+}
+
 export async function ensureConfigList(): Promise<void> {
   if (!hasSpContext()) return;
 
@@ -63,7 +73,7 @@ export async function ensureConfigList(): Promise<void> {
     console.log("Creating default configuration item...");
     await spListAddItem(LIST_NAME, {
       Title: 'Configuracao Geral',
-      [COL_DATE]: new Date().toISOString(),
+      [COL_DATE]: getSaoPauloISOString(),
       [COL_INTERVAL]: 5,
       [COL_STATUS]: 'LIVRE',
       [COL_USER]: '',
@@ -105,13 +115,13 @@ export async function acquireLock(id: number, userEmail: string): Promise<boolea
   if (!config) return false;
 
   const timeoutMinutes = Number(import.meta.env.VITE_LOCK_TIMEOUT_MINUTES) || 3;
-  const isExpired = config.lockTime ? (Date.now() - new Date(config.lockTime).getTime()) > timeoutMinutes * 60 * 1000 : true;
+  const isExpired = config.lockTime ? (getSaoPauloDate().getTime() - new Date(config.lockTime).getTime()) > timeoutMinutes * 60 * 1000 : true;
 
   if (config.status === 'LIVRE' || isExpired) {
     const res = await spListUpdateItem(LIST_NAME, id, {
       [COL_STATUS]: 'ATUALIZANDO',
       [COL_USER]: userEmail,
-      [COL_LOCK_TIME]: new Date().toISOString()
+      [COL_LOCK_TIME]: getSaoPauloISOString()
     });
     return res.status;
   }
@@ -131,7 +141,7 @@ export async function releaseLock(id: number): Promise<void> {
 export async function updateApiCache(id: number, data: { teste?: string; kit?: string }): Promise<void> {
   if (!hasSpContext()) return;
   const fields: any = {
-    [COL_DATE]: new Date().toISOString()
+    [COL_DATE]: getSaoPauloISOString()
   };
   if (data.teste !== undefined) fields[COL_CACHE_TESTE] = data.teste;
   if (data.kit !== undefined) fields[COL_CACHE_KIT] = data.kit;

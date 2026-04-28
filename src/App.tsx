@@ -13,7 +13,7 @@ import { MOCK_SUMMARY_DATA } from './constants';
 import { fetchApiData, fetchKitData } from './services/apiService';
 import { hasSpContext } from './services/sharepoint';
 import { Activity } from 'lucide-react';
-import { ensureConfigList, getAppConfig, acquireLock, releaseLock, updateApiCache, AppConfig } from './services/configService';
+import { ensureConfigList, getAppConfig, acquireLock, releaseLock, updateApiCache, AppConfig, getSaoPauloDate } from './services/configService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('RESUMO');
@@ -32,7 +32,7 @@ export default function App() {
     return Number(import.meta.env.VITE_DEFAULT_REFRESH_MINUTES) || 5;
   });
   const [configItemId, setConfigItemId] = useState<number | null>(null);
-  const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date>(getSaoPauloDate());
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState<number | null>(null);
   const [isSidebarVisible, setIsSidebarVisible] = useState(() => 
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
@@ -41,7 +41,7 @@ export default function App() {
   const [showLogs, setShowLogs] = useState(false);
 
   const addLog = (message: string, type: 'error' | 'info' = 'info') => {
-    const timestamp = new Date().toLocaleTimeString();
+    const timestamp = getSaoPauloDate().toLocaleTimeString();
     setLogs(prev => [{timestamp, message, type}, ...prev].slice(0, 50));
   };
 
@@ -118,7 +118,7 @@ export default function App() {
         const config = await getAppConfig();
         if (config) {
           const last = new Date(config.lastUpdate);
-          const diffSeconds = (Date.now() - last.getTime()) / 1000;
+          const diffSeconds = (getSaoPauloDate().getTime() - last.getTime()) / 1000;
           const intervalSeconds = config.intervalMinutes * 60;
 
           // Sync local timers with SharePoint source of truth
@@ -189,7 +189,7 @@ export default function App() {
               updateStateWithCalculatedResults({ teste: testeCalculated, kit: kitCalculated });
               
               if (!key) {
-                setLastUpdateTime(new Date());
+                setLastUpdateTime(getSaoPauloDate());
                 setSecondsUntilRefresh(config.intervalMinutes * 60);
               }
               addLog("Atualização SharePoint concluída com sucesso");
@@ -245,7 +245,7 @@ export default function App() {
       await Promise.all(updatePromises);
       
       if (!key) {
-        setLastUpdateTime(new Date());
+        setLastUpdateTime(getSaoPauloDate());
         if (autoRefreshInterval > 0) {
           setSecondsUntilRefresh(autoRefreshInterval * 60);
         }
