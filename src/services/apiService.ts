@@ -78,30 +78,76 @@ export async function fetchApiData(): Promise<ApiResponseItem[]> {
   }
 }
 
-export async function fetchExcelSummary(): Promise<{ totalPlanned: number; count: number }> {
-  try {
-    const response = await fetch("/api/excel-data");
-    if (!response.ok) {
-      throw new Error(`Erro API Excel: ${response.status}`);
-    }
-    return await response.json();
-  } catch (error) {
-    console.error("Fetch Excel error:", error);
-    throw error;
-  }
-}
+export async function fetchKitData(): Promise<any[]> {
+  const KIT_QUERY = `
+SELECT 
+    TRUNC(trndte) data,
+    item,
+    mascara,
+    SUM(quantidade) quantidade,
+    status_inicial,
+    status_final
+FROM (
+    SELECT 
+        trndte,
+        dtlnum,
+        trndte AS data,
+        prtnum AS item,
+        lotnum AS mascara,
+        trnqty AS quantidade,
+        dscmst.lngdsc AS status_inicial,
+        dscmst2.lngdsc AS status_final,
+        ROW_NUMBER() OVER (
+            PARTITION BY dtlnum
+            ORDER BY trndte DESC
+        ) AS rn
+    FROM dlytrn
+    INNER JOIN dscmst 
+        ON dscmst.colval = dlytrn.frinvs 
+       AND dscmst.locale_id = 'US_ENGLISH' 
+       AND dscmst.colnam = 'invsts' 
+    INNER JOIN dscmst dscmst2 
+        ON dscmst2.colval = dlytrn.toinvs 
+       AND dscmst2.locale_id = 'US_ENGLISH' 
+       AND dscmst2.colnam = 'invsts'
+    WHERE actcod = 'INVSTSCHG' 
+      AND dlytrn.frinvs IN ('GKI','TKI') 
+      AND dlytrn.toinvs IN ('GDK','GGRK','TRRK') 
+      -- AND TRUNC(trndte) = TRUNC(SYSDATE - 1) 
+      AND usr_id = 'API'
+)
+WHERE rn = 1
+  AND status_final = 'GDK - Good Disponivel KIT'
+GROUP BY
+    TRUNC(trndte),
+    item,
+    mascara,
+    status_inicial,
+    status_final
+  `;
 
-export async function fetchKitAvailability(): Promise<{ totalAvailable: number }> {
+  const body = {
+    query: KIT_QUERY,
+    id_score: "recebimentos_rdts"
+  };
+
   try {
-    const response = await fetch("/api/kit-availability", {
+    const response = await fetch(API_URL, {
       method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
     });
+
     if (!response.ok) {
-      throw new Error(`Erro API Kit Availability: ${response.status}`);
+      throw new Error(`Erro: ${response.status}`);
     }
-    return await response.json();
+
+    const data = await response.json();
+    return data;
   } catch (error) {
-    console.error("Fetch Kit Availability error:", error);
+    console.error("Fetch error Kit:", error);
     throw error;
   }
 }

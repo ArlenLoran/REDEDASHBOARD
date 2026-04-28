@@ -10,12 +10,15 @@ import Header from './components/Header';
 import SummaryView from './components/SummaryView';
 import DetailedView from './components/DetailedView';
 import { MOCK_SUMMARY_DATA } from './constants';
-import { fetchApiData, fetchExcelSummary, fetchKitAvailability } from './services/apiService';
+import { fetchApiData, fetchKitData } from './services/apiService';
+import { hasSpContext } from './services/sharepoint';
+import { ensureConfigList, getAppConfig, updateLastUpdate } from './services/configService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('RESUMO');
   const [summaryData, setSummaryData] = useState<Record<string, SummaryMetric>>(MOCK_SUMMARY_DATA);
-  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(0); // 0 means disabled
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(5); // Default to 5 mins
+  const [configItemId, setConfigItemId] = useState<number | null>(null);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
   const [secondsUntilRefresh, setSecondsUntilRefresh] = useState<number | null>(null);
   const [isSidebarVisible, setIsSidebarVisible] = useState(() => 
@@ -62,34 +65,20 @@ export default function App() {
             }
           }));
         } else if (k === 'MONTAGEM KIT') {
-          try {
-            const [excelData, kitData] = await Promise.all([
-              fetchExcelSummary(),
-              fetchKitAvailability()
-            ]);
-            
-            setSummaryData(prev => ({
-              ...prev,
-              [k]: {
-                ...prev[k],
-                plannedDay: excelData.totalPlanned,
-                plannedToHour: Math.floor(excelData.totalPlanned * 0.4), // Exemplo de cálculo proporcional
-                realToHour: Math.floor(excelData.totalPlanned * 0.35),   // Exemplo de cálculo proporcional
-                delta: Math.floor(excelData.totalPlanned * -0.05),      // Exemplo de cálculo proporcional
-                totalAvailable: kitData.totalAvailable,
-                isLoading: false,
-              }
-            }));
-          } catch (error) {
-            console.error("Erro ao carregar dados Montagem Kit:", error);
-            setSummaryData(prev => ({
-              ...prev,
-              [k]: {
-                ...prev[k],
-                isLoading: false,
-              }
-            }));
-          }
+          const kitResults = await fetchKitData();
+          const totalDisp = kitResults.reduce((acc, item: any) => {
+            const val = item.QUANTIDADE || item.quantidade || 0;
+            return acc + Number(val);
+          }, 0);
+
+          setSummaryData(prev => ({
+            ...prev,
+            [k]: {
+              ...prev[k],
+              totalAvailable: totalDisp,
+              isLoading: false,
+            }
+          }));
         } else {
           // Simulate network delay for mock data
           const randomDelay = 500 + Math.random() * 1500;
@@ -117,12 +106,34 @@ export default function App() {
       if (autoRefreshInterval > 0) {
         setSecondsUntilRefresh(autoRefreshInterval * 60);
       }
+      // If we are in SharePoint, update the list 
+      if (configItemId !== null) {
+        updateLastUpdate(configItemId).catch(err => console.error("Failed to update SP timestamp", err));
+      }
     }
 
     await Promise.all(updatePromises);
   };
 
   useEffect(() => {
+    const initSp = async () => {
+      if (hasSpContext()) {
+        try {
+          await ensureConfigList();
+          const config = await getAppConfig();
+          if (config) {
+            setAutoRefreshInterval(config.intervalMinutes);
+            setConfigItemId(config.id);
+            // If we have a stored last update, we could sync it, 
+            // but usually we want to start fresh or just display it.
+          }
+        } catch (err) {
+          console.error("SharePoint init failed", err);
+        }
+      }
+    };
+
+    initSp();
     loadApiData();
   }, []);
 
