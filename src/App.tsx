@@ -12,7 +12,7 @@ import DetailedView from './components/DetailedView';
 import { MOCK_SUMMARY_DATA } from './constants';
 import { fetchApiData, fetchKitData } from './services/apiService';
 import { hasSpContext } from './services/sharepoint';
-import { ensureConfigList, getAppConfig, updateLastUpdate } from './services/configService';
+import { ensureConfigList, getAppConfig, acquireLock, releaseLock, updateApiCache, AppConfig } from './services/configService';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('RESUMO');
@@ -37,14 +37,137 @@ export default function App() {
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
 
-  const loadApiData = async (key?: string, options: { skipTimestampUpdate?: boolean } = {}) => {
-    // Only refresh keys that are not already loading
+  const updateStateWithResults = (results: { teste?: any[], kit?: any[] }) => {
+    setSummaryData(prev => {
+      const next = { ...prev };
+      
+      if (results.teste) {
+        const totalQtd = results.teste.reduce((acc: number, item: any) => {
+          const val = item.QTD ?? item.qtd ?? 0;
+          return acc + Number(val);
+        }, 0);
+        
+        next['Teste API'] = {
+          ...next['Teste API'],
+          plannedDay: totalQtd,
+          plannedToHour: Math.floor(totalQtd * 0.4),
+          realToHour: Math.floor(totalQtd * 0.45),
+          delta: Math.floor(totalQtd * 0.05),
+          totalAvailable: totalQtd,
+          isLoading: false,
+        };
+      }
+
+      if (results.kit) {
+        const totalDisp = results.kit.reduce((acc: number, item: any) => {
+          const val = item.QUANTIDADE ?? item.quantidade ?? 0;
+          return acc + Number(val);
+        }, 0);
+
+        next['MONTAGEM KIT'] = {
+          ...next['MONTAGEM KIT'],
+          totalAvailable: totalDisp,
+          isLoading: false,
+        };
+      }
+
+      localStorage.setItem('cockpit_summary_data', JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const loadApiData = async (key?: string) => {
+    // If we are in SharePoint, use centralized caching logic
+    if (hasSpContext()) {
+      const config = await getAppConfig();
+      if (config) {
+        const last = new Date(config.lastUpdate);
+        const diffSeconds = (Date.now() - last.getTime()) / 1000;
+        const intervalSeconds = config.intervalMinutes * 60;
+
+        // If it was a manual key refresh OR time has passed, try to refresh from API
+        const isExpired = diffSeconds >= intervalSeconds || diffSeconds < 0;
+        const shouldRefreshPool = !key && isExpired;
+        const isManualSingle = !!key;
+
+        // Sync local timers with SharePoint source of truth
+        if (!key) {
+          setLastUpdateTime(last);
+          const remaining = Math.max(0, Math.ceil(intervalSeconds - diffSeconds));
+          setSecondsUntilRefresh(remaining);
+        }
+
+        // If time hasn't passed and it's not a manual refresh, just use the cache from columns
+        if (!isManualSingle && !isExpired) {
+          try {
+            const results: any = {};
+            if (config.cacheTeste) results.teste = JSON.parse(config.cacheTeste);
+            if (config.cacheKit) results.kit = JSON.parse(config.cacheKit);
+            if (Object.keys(results).length > 0) {
+              updateStateWithResults(results);
+              return;
+            }
+          } catch (e) {
+            console.error("Failed to parse SP cache", e);
+          }
+        }
+
+        // We need to refresh (either because of timer or manual click)
+        const userMail = (window as any)._spPageContextInfo?.userEmail || 'Desconhecido';
+        const locked = await acquireLock(config.id, userMail);
+
+        if (locked) {
+          try {
+            // If it was a manual refresh for one key, we could fetch just one, 
+            // but for simplicity and to keep cache consistent, we fetch all.
+            const apiData = await fetchApiData();
+            const rawApi = Array.isArray(apiData) ? apiData : ((apiData as any)?.value || []);
+            
+            const kitData = await fetchKitData();
+            const rawKit = Array.isArray(kitData) ? kitData : ((kitData as any)?.value || []);
+
+            // Save to SharePoint
+            await updateApiCache(config.id, {
+              teste: JSON.stringify(rawApi),
+              kit: JSON.stringify(rawKit)
+            });
+
+            // Update local state
+            updateStateWithResults({ teste: rawApi, kit: rawKit });
+            
+            if (!key) {
+              setLastUpdateTime(new Date());
+              setSecondsUntilRefresh(config.intervalMinutes * 60);
+            }
+
+          } catch (err) {
+            console.error("Refresh failed", err);
+          } finally {
+            await releaseLock(config.id);
+          }
+        } else {
+          // Lock held by someone else, pull current cache which might be being updated
+          // We can wait a few seconds or just pull what is there.
+          const freshConfig = await getAppConfig();
+          if (freshConfig) {
+            try {
+              const res: any = {};
+              if (freshConfig.cacheTeste) res.teste = JSON.parse(freshConfig.cacheTeste);
+              if (freshConfig.cacheKit) res.kit = JSON.parse(freshConfig.cacheKit);
+              updateStateWithResults(res);
+            } catch (e) { /* ignore */ }
+          }
+        }
+        return;
+      }
+    }
+
+    // Default logic (Non-SP)
     const keysToUpdate = (key ? [key] : Object.keys(summaryData))
       .filter(k => !summaryData[k].isLoading);
 
     if (keysToUpdate.length === 0) return;
 
-    // Set specified keys to loading
     setSummaryData(prev => {
       const next = { ...prev };
       keysToUpdate.forEach(k => {
@@ -53,131 +176,59 @@ export default function App() {
       return next;
     });
 
-    let newSummaryData = { ...summaryData };
-
-    // Create a list of update promises
     const updatePromises = keysToUpdate.map(async (k) => {
       try {
-        let updatedMetric: SummaryMetric;
         if (k === 'Teste API') {
           const rawData = await fetchApiData();
           const apiResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
-          const totalQtd = apiResults.reduce((acc: number, item: any) => {
-            const val = item.QTD ?? item.qtd ?? 0;
-            return acc + Number(val);
-          }, 0);
-
-          updatedMetric = {
-            ...summaryData[k],
-            plannedDay: totalQtd,
-            plannedToHour: Math.floor(totalQtd * 0.4),
-            realToHour: Math.floor(totalQtd * 0.45),
-            delta: Math.floor(totalQtd * 0.05),
-            totalAvailable: totalQtd,
-            isLoading: false,
-          };
+          updateStateWithResults({ teste: apiResults });
         } else if (k === 'MONTAGEM KIT') {
           const rawData = await fetchKitData();
           const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
-          const totalDisp = kitResults.reduce((acc: number, item: any) => {
-            const val = item.QUANTIDADE ?? item.quantidade ?? 0;
-            return acc + Number(val);
-          }, 0);
-
-          updatedMetric = {
-            ...summaryData[k],
-            totalAvailable: totalDisp,
-            isLoading: false,
-          };
+          updateStateWithResults({ kit: kitResults });
         } else {
-          // Simulate network delay for mock data
-          const randomDelay = 500 + Math.random() * 1500;
-          await new Promise(resolve => setTimeout(resolve, randomDelay));
-          updatedMetric = { ...summaryData[k], isLoading: false };
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          setSummaryData(prev => ({
+            ...prev,
+            [k]: { ...prev[k], isLoading: false }
+          }));
         }
-
-        setSummaryData(prev => {
-          const next = { ...prev, [k]: updatedMetric };
-          if (!key) { // If it's a full refresh, we'll save at the end
-            newSummaryData = next;
-          } else {
-            localStorage.setItem('cockpit_summary_data', JSON.stringify(next));
-          }
-          return next;
-        });
       } catch (err) {
         console.error(`Failed to load data for ${k}`, err);
-        setSummaryData(prev => {
-          const next = { ...prev, [k]: { ...prev[k], isLoading: false } };
-          return next;
-        });
+        setSummaryData(prev => ({
+          ...prev,
+          [k]: { ...prev[k], isLoading: false }
+        }));
       }
     });
 
     await Promise.all(updatePromises);
-
-    // If it's a full refresh, update the timestamps
+    
     if (!key) {
-      localStorage.setItem('cockpit_summary_data', JSON.stringify(newSummaryData));
-
-      if (!options.skipTimestampUpdate) {
-        setLastUpdateTime(new Date());
-        if (autoRefreshInterval > 0) {
-          setSecondsUntilRefresh(autoRefreshInterval * 60);
-        }
-        // If we are in SharePoint, update the list 
-        if (configItemId !== null) {
-          updateLastUpdate(configItemId).catch(err => console.error("Failed to update SP timestamp", err));
-        }
+      setLastUpdateTime(new Date());
+      if (autoRefreshInterval > 0) {
+        setSecondsUntilRefresh(autoRefreshInterval * 60);
       }
     }
   };
 
   useEffect(() => {
     const initSpAndData = async () => {
-      let skipInitialFetch = false;
-      let syncStoredLastUpdate = new Date();
-      let syncRemainingSeconds: number | null = null;
-      let spConfigId: number | null = null;
-      let spInterval = Number(import.meta.env.VITE_DEFAULT_REFRESH_MINUTES) || 5;
-
       if (hasSpContext()) {
         try {
           await ensureConfigList();
           const config = await getAppConfig();
           if (config) {
-            spConfigId = config.id;
-            spInterval = config.intervalMinutes;
-            
-            const last = new Date(config.lastUpdate);
-            const now = new Date();
-            const diffSeconds = (now.getTime() - last.getTime()) / 1000;
-            const intervalSeconds = config.intervalMinutes * 60;
-
-            // If time hasn't passed and we have cached data, skip the fetch on mount
-            const hasCache = !!localStorage.getItem('cockpit_summary_data');
-            if (diffSeconds < intervalSeconds && diffSeconds >= 0 && hasCache) {
-              skipInitialFetch = true;
-              syncStoredLastUpdate = last;
-              syncRemainingSeconds = Math.ceil(intervalSeconds - diffSeconds);
-            }
-            
-            setAutoRefreshInterval(spInterval);
-            setConfigItemId(spConfigId);
+            setConfigItemId(config.id);
+            setAutoRefreshInterval(config.intervalMinutes);
           }
         } catch (err) {
           console.error("SharePoint init failed", err);
         }
       }
-
-      if (!skipInitialFetch) {
-        // Load fresh data
-        await loadApiData();
-      } else {
-        // Just sync timers with SharePoint
-        setLastUpdateTime(syncStoredLastUpdate);
-        setSecondsUntilRefresh(syncRemainingSeconds);
-      }
+      
+      // Load initial data (handles caching internally)
+      await loadApiData();
     };
 
     initSpAndData();

@@ -4,6 +4,7 @@ import {
   spCreateList, 
   spListEnsureTextField, 
   spListEnsureNumberField,
+  spListEnsureMultiLineTextField,
   spListGetItems,
   spListAddItem,
   spListUpdateItem
@@ -13,10 +14,22 @@ const LIST_NAME = 'ConfiguracoesApp';
 const COL_DATE = 'DataUltimaAtualizacao';
 const COL_INTERVAL = 'IntervaloMinutos';
 
+// Cache and Lock Columns
+const COL_CACHE_TESTE = 'CacheTesteAPI';
+const COL_CACHE_KIT = 'CacheMontagemKit';
+const COL_STATUS = 'StatusAtualizacao';
+const COL_USER = 'UsuarioAtualizacao';
+const COL_LOCK_TIME = 'DataTrava';
+
 export interface AppConfig {
   id: number;
   lastUpdate: string;
   intervalMinutes: number;
+  status: string;
+  lockUser: string;
+  lockTime: string;
+  cacheTeste: string;
+  cacheKit: string;
 }
 
 export async function ensureConfigList(): Promise<void> {
@@ -34,8 +47,15 @@ export async function ensureConfigList(): Promise<void> {
 
   // Ensure columns
   console.log("Ensuring columns exist...");
-  await spListEnsureTextField(LIST_NAME, COL_DATE);
-  await spListEnsureNumberField(LIST_NAME, COL_INTERVAL);
+  await Promise.all([
+    spListEnsureTextField(LIST_NAME, COL_DATE),
+    spListEnsureNumberField(LIST_NAME, COL_INTERVAL),
+    spListEnsureMultiLineTextField(LIST_NAME, COL_CACHE_TESTE),
+    spListEnsureMultiLineTextField(LIST_NAME, COL_CACHE_KIT),
+    spListEnsureTextField(LIST_NAME, COL_STATUS),
+    spListEnsureTextField(LIST_NAME, COL_USER),
+    spListEnsureTextField(LIST_NAME, COL_LOCK_TIME)
+  ]);
 
   // Check if we have an item, if not create one
   const items = await spListGetItems(LIST_NAME);
@@ -44,7 +64,10 @@ export async function ensureConfigList(): Promise<void> {
     await spListAddItem(LIST_NAME, {
       Title: 'Configuracao Geral',
       [COL_DATE]: new Date().toISOString(),
-      [COL_INTERVAL]: 5
+      [COL_INTERVAL]: 5,
+      [COL_STATUS]: 'LIVRE',
+      [COL_USER]: '',
+      [COL_LOCK_TIME]: ''
     });
   }
 }
@@ -53,7 +76,7 @@ export async function getAppConfig(): Promise<AppConfig | null> {
   if (!hasSpContext()) return null;
 
   const res = await spListGetItems<any>(LIST_NAME, {
-    select: ['Id', COL_DATE, COL_INTERVAL]
+    select: ['Id', COL_DATE, COL_INTERVAL, COL_STATUS, COL_USER, COL_LOCK_TIME, COL_CACHE_TESTE, COL_CACHE_KIT]
   });
 
   if (res.status && res.data.length > 0) {
@@ -61,16 +84,56 @@ export async function getAppConfig(): Promise<AppConfig | null> {
     return {
       id: item.Id,
       lastUpdate: item[COL_DATE] || '',
-      intervalMinutes: item[COL_INTERVAL] || 5
+      intervalMinutes: item[COL_INTERVAL] || 5,
+      status: item[COL_STATUS] || 'LIVRE',
+      lockUser: item[COL_USER] || '',
+      lockTime: item[COL_LOCK_TIME] || '',
+      cacheTeste: item[COL_CACHE_TESTE] || '',
+      cacheKit: item[COL_CACHE_KIT] || ''
     };
   }
   return null;
 }
 
-export async function updateLastUpdate(id: number): Promise<void> {
-  if (!hasSpContext()) return;
+export async function acquireLock(id: number, userEmail: string): Promise<boolean> {
+  if (!hasSpContext()) return false;
 
+  // Try to set status to ATUALIZANDO only if it was LIVRE or expired
+  // SharePoint REST doesn't have a native compare-and-swap that is easy without Etag
+  // but we can try to "peek" the status first.
+  const config = await getAppConfig();
+  if (!config) return false;
+
+  const isExpired = config.lockTime ? (Date.now() - new Date(config.lockTime).getTime()) > 3 * 60 * 1000 : true;
+
+  if (config.status === 'LIVRE' || isExpired) {
+    const res = await spListUpdateItem(LIST_NAME, id, {
+      [COL_STATUS]: 'ATUALIZANDO',
+      [COL_USER]: userEmail,
+      [COL_LOCK_TIME]: new Date().toISOString()
+    });
+    return res.status;
+  }
+
+  return false;
+}
+
+export async function releaseLock(id: number): Promise<void> {
+  if (!hasSpContext()) return;
   await spListUpdateItem(LIST_NAME, id, {
-    [COL_DATE]: new Date().toISOString()
+    [COL_STATUS]: 'LIVRE',
+    [COL_USER]: '',
+    [COL_LOCK_TIME]: ''
   });
+}
+
+export async function updateApiCache(id: number, data: { teste?: string; kit?: string }): Promise<void> {
+  if (!hasSpContext()) return;
+  const fields: any = {
+    [COL_DATE]: new Date().toISOString()
+  };
+  if (data.teste !== undefined) fields[COL_CACHE_TESTE] = data.teste;
+  if (data.kit !== undefined) fields[COL_CACHE_KIT] = data.kit;
+
+  await spListUpdateItem(LIST_NAME, id, fields);
 }

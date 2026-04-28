@@ -321,6 +321,30 @@ export async function spListEnsureTextField(listName: string, fieldTitle: string
   }
 }
 
+export async function spListEnsureMultiLineTextField(listName: string, fieldTitle: string): Promise<SpResult<true>> {
+  try {
+    if (await spFieldExists(listName, fieldTitle)) return { status: true, data: true };
+    const ln = sanitizeInput(listName);
+    const ft = sanitizeInput(fieldTitle);
+    const listUrl = `${spSiteUrl()}/_api/web/lists/getByTitle('${escapeODataString(ln)}')`;
+    const safeName = ft.replace(/\s+/g, '');
+    const schemaXml = `<Field DisplayName="${ft}" Name="${safeName}" StaticName="${safeName}" Type="Note" RichText="false" />`;
+    const url = `${listUrl}/fields/createFieldAsXml`;
+    const body = {
+      parameters: {
+        __metadata: { type: 'SP.XmlSchemaFieldCreationInformation' },
+        SchemaXml: schemaXml,
+        Options: 0
+      }
+    };
+    const resp = await fetchWithDigestRetry(url, { method: 'POST', headers: headersJson(), body: JSON.stringify(body) });
+    if (!resp.ok) return { status: false, message: await parseSpError(resp) };
+    return { status: true, data: true };
+  } catch (error: any) {
+    return { status: false, message: error.message };
+  }
+}
+
 export async function spListEnsureNumberField(listName: string, fieldTitle: string): Promise<SpResult<true>> {
   try {
     if (await spFieldExists(listName, fieldTitle)) return { status: true, data: true };
