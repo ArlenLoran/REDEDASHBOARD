@@ -33,13 +33,11 @@ export interface AppConfig {
 }
 
 export function getSaoPauloDate(): Date {
-  const now = new Date();
-  const spOffset = -3; // UTC-3
-  return new Date(now.getTime() + (spOffset * 60 * 60 * 1000));
+  return new Date(); // Return actual current Date (UTC internal)
 }
 
 function getSaoPauloISOString(): string {
-  return getSaoPauloDate().toISOString();
+  return new Date().toISOString(); // Real UTC ISO
 }
 
 export async function ensureConfigList(): Promise<void> {
@@ -115,7 +113,9 @@ export async function acquireLock(id: number, userEmail: string): Promise<boolea
   if (!config) return false;
 
   const timeoutMinutes = Number(import.meta.env.VITE_LOCK_TIMEOUT_MINUTES) || 3;
-  const isExpired = config.lockTime ? (getSaoPauloDate().getTime() - new Date(config.lockTime).getTime()) > timeoutMinutes * 60 * 1000 : true;
+  const lockDate = config.lockTime ? new Date(config.lockTime).getTime() : 0;
+  const now = Date.now();
+  const isExpired = lockDate === 0 || (now - lockDate) > timeoutMinutes * 60 * 1000;
 
   if (config.status === 'LIVRE' || isExpired) {
     const res = await spListUpdateItem(LIST_NAME, id, {
@@ -146,5 +146,15 @@ export async function updateApiCache(id: number, data: { teste?: string; kit?: s
   if (data.teste !== undefined) fields[COL_CACHE_TESTE] = data.teste;
   if (data.kit !== undefined) fields[COL_CACHE_KIT] = data.kit;
 
-  await spListUpdateItem(LIST_NAME, id, fields);
+  console.log(`Atualizando cache SP (ID: ${id}) colunas:`, Object.keys(fields));
+  try {
+    const res = await spListUpdateItem(LIST_NAME, id, fields);
+    if (!res.status) {
+      console.error(`Erro SP: ${res.message}`, res);
+      throw new Error(`FALHA_UPDATE_LISTA: ${res.message}`);
+    }
+  } catch (err) {
+    console.error("Erro fatal ao atualizar SharePoint:", err);
+    throw err;
+  }
 }

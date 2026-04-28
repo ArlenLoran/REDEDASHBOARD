@@ -31,6 +31,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: -545,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
   'CATALOGAÇÃO': {
     title: 'CATALOGAÇÃO',
@@ -40,6 +41,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 255,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
   'TRIAGEM FUNCIONAL': {
     title: 'TRIAGEM FUNCIONAL',
@@ -49,6 +51,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 122,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
   'CARGA APP + TRIAGEM': {
     title: 'CARGA APP + TRIAGEM',
@@ -58,6 +61,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 122,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
   'SALA BATERIAS': {
     title: 'SALA BATERIAS',
@@ -67,6 +71,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 122,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
   'SEPARAÇÃO COMPONENTES': {
     title: 'SEPARAÇÃO COMPONENTES',
@@ -76,6 +81,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 122,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
   'MONTAGEM KIT': {
     title: 'MONTAGEM KIT',
@@ -85,6 +91,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 122,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
   'CQ': {
     title: 'CQ',
@@ -94,6 +101,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 122,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
   'EXPEDIÇÃO': {
     title: 'EXPEDIÇÃO',
@@ -103,6 +111,7 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     delta: 122,
     totalAvailable: 3900,
     deltaProduction: 40,
+    isLoading: false,
   },
 };
 
