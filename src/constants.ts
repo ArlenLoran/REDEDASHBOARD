@@ -92,6 +92,8 @@ export const MOCK_SUMMARY_DATA: Record<string, SummaryMetric> = {
     totalAvailable: 3900,
     deltaProduction: 40,
     isLoading: false,
+    remainingTimeText: '--h --m',
+    baseHourlyRate: 290,
   },
   'CQ': {
     title: 'CQ',

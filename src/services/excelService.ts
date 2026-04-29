@@ -16,27 +16,71 @@ export async function fetchPlannedKitValue(logCallback?: (msg: string, type?: 'i
   try {
     log("Iniciando leitura do Consenso.xlsx...");
     
-    // Tenta primeiro o caminho relativo ao root da app
-    const fileUrl = new URL('Consenso.xlsx', window.location.href).href;
+    // Usando URL relativa ao local do script/html para maior compatibilidade em subdiretórios (SharePoint)
+    // Isso garante que se o app estiver em /sites/pages/app/index.html, ele busque em /sites/pages/app/Consenso.xlsx
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+    const baseDir = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
+    const fileUrl = `${baseDir}Consenso.xlsx?v=${Date.now()}`;
+    
     log(`Buscando em: ${fileUrl}`);
 
-    const response = await fetch(fileUrl);
+    let response = await fetch(fileUrl);
+    
     if (!response.ok) {
-      log(`Falha ao carregar Consenso.xlsx: ${response.status} ${response.statusText}`, 'error');
-      return 0;
+        log(`Falha no caminho relativo (Status: ${response.status}). Tentando caminho absoluto...`, 'warn');
+        const rootUrl = `/Consenso.xlsx?v=${Date.now()}`;
+        const rootResponse = await fetch(rootUrl);
+        if (rootResponse.ok) {
+            response = rootResponse;
+        } else {
+            throw new Error(`Não foi possível encontrar o arquivo Consenso.xlsx em ${fileUrl} ou no root.`);
+        }
     }
     
-    const arrayBuffer = await response.arrayBuffer();
-    log(`Arquivo recebido (${arrayBuffer.byteLength} bytes). Processando workbook...`);
-    
+    return processResponse(response, log);
+  } catch (error) {
+    log(`Erro fatal ao processar Excel: ${String(error)}`, 'error');
+    console.error(error);
+    return 0;
+  }
+}
+
+async function processResponse(response: Response, log: (msg: string, type?: 'info' | 'error' | 'warn') => void): Promise<number> {
+  const contentType = response.headers.get('content-type') || '';
+  
+  // Se for HTML, é quase certo que é uma página de erro 404 do servidor capturada
+  if (contentType.includes('text/html')) {
+    log("Erro: O servidor retornou HTML em vez de Excel (provável 404 redirecionado). Verifique se o arquivo Consenso.xlsx está na pasta public.", "error");
+    return 0;
+  }
+  
+  const arrayBuffer = await response.arrayBuffer();
+  
+  // Arquivos XLSX são Zips, precisam ter um tamanho mínimo
+  if (arrayBuffer.byteLength < 100) {
+    log(`Erro: Arquivo recebido é inválido ou muito pequeno (${arrayBuffer.byteLength} bytes).`, "error");
+    return 0;
+  }
+
+  log(`Arquivo recebido (${arrayBuffer.byteLength} bytes). Processando workbook...`);
+  
+  try {
     const workbook = read(arrayBuffer, { type: 'array' });
     
     const firstSheetName = workbook.SheetNames[0];
-    const worksheet = workbook.Sheets[firstSheetName];
+    if (!firstSheetName) {
+        throw new Error("O arquivo Excel não contém planilhas.");
+    }
     
+    const worksheet = workbook.Sheets[firstSheetName];
     const data = utils.sheet_to_json(worksheet) as ConsensoData[];
     log(`Planilha lida: ${data.length} linhas encontradas.`);
     
+    if (data.length === 0) {
+      log("Aviso: Planilha vazia ou sem dados.", "warn");
+      return 0;
+    }
+
     const filtered = data.filter(row => {
       const info = String(row.INFORMACAO || '').trim();
       const periodo = String(row.PERIODO || '').trim();
@@ -45,6 +89,11 @@ export async function fetchPlannedKitValue(logCallback?: (msg: string, type?: 'i
     
     log(`Filtro aplicado (Montagem Kit total + M+1): ${filtered.length} linhas correspondentes.`);
     
+    if (filtered.length === 0) {
+      log("Aviso: Nenhuma linha correspondente ao filtro (Montagem Kit total + M+1) foi encontrada no Excel.", "warn");
+      return 0;
+    }
+    
     const total = filtered.reduce((acc, row) => {
       const val = Number(row.QTD_DIARIA);
       return acc + (isNaN(val) ? 0 : val);
@@ -52,9 +101,8 @@ export async function fetchPlannedKitValue(logCallback?: (msg: string, type?: 'i
     
     log(`Soma QTD_DIARIA calculada: ${total}`);
     return total;
-  } catch (error) {
-    log(`Erro fatal ao processar Excel: ${String(error)}`, 'error');
-    console.error(error);
+  } catch (e) {
+    log(`Erro ao ler formato ZIP/Excel: ${String(e)}. Verifique se o arquivo não está corrompido.`, 'error');
     return 0;
   }
 }

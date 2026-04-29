@@ -36,6 +36,7 @@ from (
     from dlytrn
     where actcod in('RCV')
       and fr_arecod like 'RDTS'
+      and trndte >= CURRENT_DATE - 1
 
     union all
 
@@ -49,6 +50,7 @@ from (
     from dlytrn
     where actcod in('IDNTFY','RCV')
       and usr_id = 'API'
+      and trndte >= CURRENT_DATE - 1
 )
 group by
 trndte,
@@ -56,7 +58,7 @@ prtnum,
 lotnum,
 frinvs,
 usr_id
-fetch first 10 rows only
+fetch first 500 rows only
 `;
 
 export async function fetchApiData(urlOverride?: string): Promise<ApiResponseItem[]> {
@@ -90,7 +92,7 @@ export async function fetchApiData(urlOverride?: string): Promise<ApiResponseIte
 export async function fetchKitData(urlOverride?: string): Promise<any[]> {
   const KIT_QUERY = `
 SELECT 
-    TRUNC(trndte) data,
+    TO_CHAR(trndte, 'DD/MM/YYYY HH24:MI:SS') AS data,
     item,
     mascara,
     SUM(quantidade) quantidade,
@@ -100,7 +102,6 @@ FROM (
     SELECT 
         trndte,
         dtlnum,
-        trndte AS data,
         prtnum AS item,
         lotnum AS mascara,
         trnqty AS quantidade,
@@ -122,18 +123,19 @@ FROM (
     WHERE actcod = 'INVSTSCHG' 
       AND dlytrn.frinvs IN ('GKI','TKI') 
       AND dlytrn.toinvs IN ('GDK','GGRK','TRRK') 
-      -- AND TRUNC(trndte) = TRUNC(SYSDATE - 1) 
       AND usr_id = 'API'
+      AND trndte >= CURRENT_DATE - 1
 )
 WHERE rn = 1
   AND status_final = 'GDK - Good Disponivel KIT'
 GROUP BY
-    TRUNC(trndte),
+    TO_CHAR(trndte, 'DD/MM/YYYY HH24:MI:SS'),
     item,
     mascara,
     status_inicial,
     status_final
-    fetch first 10 rows only
+ORDER BY
+    data ASC
   `;
 
   const body = {
