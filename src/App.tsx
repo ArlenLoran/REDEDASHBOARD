@@ -19,26 +19,19 @@ import { ensureConfigList, getAppConfig, acquireLock, releaseLock, updateApiCach
 export default function App() {
   const [activeTab, setActiveTab] = useState<DashboardTab>('RESUMO');
   const [summaryData, setSummaryData] = useState<Record<string, SummaryMetric>>(() => {
-    const initial = { ...MOCK_SUMMARY_DATA };
     const cached = localStorage.getItem('cockpit_summary_data');
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
         Object.keys(parsed).forEach(k => {
-          if (initial[k]) {
-            initial[k] = { 
-              ...initial[k], 
-              ...parsed[k], 
-              isLoading: false 
-            };
-          }
+          if (parsed[k]) parsed[k].isLoading = false;
         });
-        return initial;
+        return parsed;
       } catch (e) {
-        return initial;
+        return MOCK_SUMMARY_DATA;
       }
     }
-    return initial;
+    return MOCK_SUMMARY_DATA;
   });
   const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(() => {
     return Number(import.meta.env.VITE_DEFAULT_REFRESH_MINUTES) || 5;
@@ -49,7 +42,7 @@ export default function App() {
   const [isSidebarVisible, setIsSidebarVisible] = useState(() => 
     typeof window !== 'undefined' ? window.innerWidth >= 1024 : true
   );
-  const [logs, setLogs] = useState<{timestamp: string, message: string, type: 'error' | 'info' | 'warn'}[]>([]);
+  const [logs, setLogs] = useState<{timestamp: string, message: string, type: 'error' | 'info'}[]>([]);
   const [showLogs, setShowLogs] = useState(false);
 
   const formatTimeSP = (date: Date) => {
@@ -63,22 +56,19 @@ export default function App() {
     }
   };
 
-  const addLog = (message: string, type: 'error' | 'info' | 'warn' = 'info') => {
+  const addLog = (message: string, type: 'error' | 'info' = 'info') => {
     const timestamp = formatTimeSP(new Date());
     setLogs(prev => [{timestamp, message, type}, ...prev].slice(0, 50));
   };
 
   const isDebugEnabled = import.meta.env.VITE_SHOW_DEBUG_LOGS !== 'false' || (typeof window !== 'undefined' && window.location.search.includes('debug=true'));
 
-  function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 180000): Promise<T> {
+  function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 15000): Promise<T> {
     return Promise.race([
       promise,
-      new Promise<T>((_, reject) => {
-        const id = setTimeout(() => {
-          clearTimeout(id);
-          reject(new Error('TIMEOUT'));
-        }, timeoutMs);
-      })
+      new Promise<T>((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT')), timeoutMs)
+      )
     ]);
   }
 
@@ -102,95 +92,30 @@ export default function App() {
         };
       }
 
-        if (results.kit || results.kitPlanned !== undefined) {
-          const kitMetric = next['MONTAGEM KIT'];
-          
-          // Só atualiza se recebermos dados válidos ou se for uma atualização de meta deliberada
-          const totalDisp = (results.kit && results.kit.totalDisp !== undefined) ? results.kit.totalDisp : (kitMetric.totalAvailable || MOCK_SUMMARY_DATA['MONTAGEM KIT'].totalAvailable);
-          const hourlyReal = (results.kit && results.kit.hourlyReal !== undefined) ? results.kit.hourlyReal : (kitMetric.realToHour || MOCK_SUMMARY_DATA['MONTAGEM KIT'].realToHour);
-          const pDay = results.kitPlanned ?? results.kit?.plannedValue ?? kitMetric.plannedDay;
-          
-          if (pDay <= 0 && kitMetric.plannedDay > 0) {
-            addLog("Meta do Dia recebida como 0 ou nula - mantendo valor anterior.", "error");
-          }
-          
-          let finalPlannedDay = (pDay > 0) ? pDay : kitMetric.plannedDay;
-          if (finalPlannedDay <= 0) {
-            finalPlannedDay = MOCK_SUMMARY_DATA['MONTAGEM KIT'].plannedDay || 3860;
-          }
-          
-          if (isDebugEnabled && finalPlannedDay <= 0) {
-            addLog("Crítico: finalPlannedDay ainda é 0 mesmo com fallback!", "error");
-          }
-
-        // Definição da Janela: 05:20 até 23:00
-        const startHour = 5 + 20 / 60; // 5.333
-        const endHour = 23;
-        const windowDuration = endHour - startHour; // 17.666 horas de janela operacional
+      if (results.kit || results.kitPlanned !== undefined) {
+        const totalDisp = results.kit?.totalDisp ?? next['MONTAGEM KIT'].totalAvailable;
+        const pDay = results.kitPlanned ?? results.kit?.plannedValue ?? next['MONTAGEM KIT'].plannedDay;
         
-        // Tempo de Trabalho Real: 2 turnos de 06:39 (6.65h) = 13.3h
+        // Cálculo Planejado por Hora e Planejado até agora (13.3h totais)
         const totalWorkHours = 13.3;
+        const hourlyRate = pDay ? (pDay / totalWorkHours) : 0;
         
         const now = getSaoPauloDate();
-        const currentHourDecimal = now.getHours() + (now.getMinutes() / 60);
+        const startHour = 6;
+        const currentHour = now.getHours() + now.getMinutes() / 60;
+        const elapsed = Math.max(0, Math.min(totalWorkHours, currentHour - startHour));
         
-        // Horas decorridas na janela operacional (entre 0 e 17.666)
-        const windowElapsed = Math.max(0, Math.min(windowDuration, currentHourDecimal - startHour));
+        const pToHour = Math.floor(hourlyRate * elapsed);
+        const rToHour = totalDisp; 
         
-        // Janela total restante no relógio (até as 23:00)
-        const remainingWindow = Math.max(0, windowDuration - windowElapsed);
-        
-        // Proporção de tempo de trabalho: Convertendo horas de relógio em horas produtivas (13.3 / 17.6)
-        const workToWindowRatio = totalWorkHours / windowDuration;
-        const elapsedWorkHours = windowElapsed * workToWindowRatio;
-        const remainingWorkHours = remainingWindow * workToWindowRatio; 
-        
-        const kitPlannedValue = finalPlannedDay;
-
-        // 2. Expectativa Acumulada (O que já deveria estar pronto de forma linear):
-        const hourlyRateBase = kitPlannedValue ? (kitPlannedValue / totalWorkHours) : 0;
-        const expectedAccumulated = Math.floor(hourlyRateBase * elapsedWorkHours);
-        
-        // 3. Delta (Status Atual): Apenas do tempo que já passou.
-        // Diferença entre o que fiz (totalDisp) e o que deveria ter feito (expectedAccumulated).
-        const deltaResult = totalDisp - expectedAccumulated;
-
-        // 4. Plan. Hor. (Taxa de Recuperação): 
-        // Meta restante dividida pelo tempo de turno que ainda resta.
-        let recoveryRate = 0;
-        if (remainingWorkHours > 0.05) { 
-          recoveryRate = Math.ceil(Math.max(0, kitPlannedValue - totalDisp) / remainingWorkHours);
-        }
-        
-        // 5. Tempo Restante e Meta Base
-        const remHours = Math.floor(remainingWorkHours);
-        const remMinutes = Math.round((remainingWorkHours - remHours) * 60);
-        // Garante que não mostre negativo se passar das 23:00
-        const remainingTimeText = remainingWorkHours > 0 ? `${remHours}h ${remMinutes}m` : '0h 0m';
-        const baseHourlyRate = Math.floor(hourlyRateBase);
-        
-        const rToHour = hourlyReal; 
-        
-        addLog(`KIT LOGIC: Delta(${deltaResult}) | RecoveryRate(${recoveryRate})/h | Restante(${remainingTimeText})`);
-        
-        /**
-         * DETALHAMENTO DO CÁLCULO - MONTAGEM KIT (DINÂMICO)
-         * - plannedDay: Meta total do dia.
-         * - plannedToHour: "Taxa de Recuperação" (O que falta / Tempo restante).
-         * - delta: "Status do Passado" (Produzido Total - O que deveria ter sido feito até agora).
-         */
-
         next['MONTAGEM KIT'] = {
           ...next['MONTAGEM KIT'],
           totalAvailable: totalDisp,
           isLoading: false,
-          plannedDay: kitPlannedValue,
-          plannedToHour: recoveryRate,
+          plannedDay: pDay,
+          plannedToHour: pToHour,
           realToHour: rToHour,
-          delta: deltaResult,
-          deltaProduction: deltaResult,
-          remainingTimeText: remainingTimeText,
-          baseHourlyRate: baseHourlyRate
+          delta: rToHour - pToHour
         };
       }
 
@@ -300,53 +225,23 @@ export default function App() {
               addLog(`Buscando dados externos do servidor...`);
               const plannedKitPromise = fetchPlannedKitValue(addLog);
               const [apiData, kitData, kitPlanned] = await Promise.all([
-            withTimeout(fetchApiData(config.apiUrl), 45000),
-            withTimeout(fetchKitData(config.apiUrl), 45000),
-            withTimeout(plannedKitPromise, 45000)
-          ]);
+                withTimeout(fetchApiData(config.apiUrl), 12000),
+                withTimeout(fetchKitData(config.apiUrl), 12000),
+                plannedKitPromise
+              ]);
 
               const rawApi = Array.isArray(apiData) ? apiData : ((apiData as any)?.value || []);
               const rawKit = Array.isArray(kitData) ? kitData : ((kitData as any)?.value || []);
 
-              const nowBR = getSaoPauloDate();
-              const day = String(nowBR.getDate()).padStart(2, '0');
-              const month = String(nowBR.getMonth() + 1).padStart(2, '0');
-              const yearFull = nowBR.getFullYear();
-              const yearShort = String(yearFull).slice(-2);
-              
-              const todayStrFull = `${day}/${month}/${yearFull}`;
-              const todayStrShort = `${day}/${month}/${yearShort}`;
-              const currentH = nowBR.getHours();
-
-              // Filtro para TESTE (Data vem como string ISO ou similar do banco)
-              const rawApiFiltered = rawApi.filter((item: any) => {
-                const dStr = item.DATA ?? item.data;
-                if (!dStr) return false;
-                const d = new Date(dStr);
-                return d.toLocaleDateString('pt-BR') === todayStrFull;
-              });
-
-              // Filtro para KIT mais flexível (aceita DD/MM/YYYY ou DD/MM/YY)
-              const rawKitToday = rawKit.filter((item: any) => {
-                const dStr = String(item.DATA ?? item.data ?? '').trim();
-                return dStr.startsWith(todayStrFull) || dStr.startsWith(todayStrShort);
-              });
-
               const testeCalculated = {
-                totalQtd: rawApiFiltered.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0)
+                totalQtd: rawApi.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0)
               };
-              
               const kitCalculated = {
-                totalDisp: rawKitToday.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0),
-                plannedValue: kitPlanned,
-                hourlyReal: rawKitToday.filter((item: any) => {
-                  const dStr = item.DATA ?? item.data;
-                  const m = String(dStr).match(/\d{2}\/\d{2}\/\d{2,4} (\d{2}):/);
-                  return m ? parseInt(m[1], 10) === currentH : false;
-                }).reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0)
+                totalDisp: rawKit.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0),
+                plannedValue: kitPlanned // Agora o planejado é salvo no cache
               };
 
-              addLog(`AUDIT KIT: Meta=${kitPlanned}, ProduzidoToday=${kitCalculated.totalDisp}, HoraAtualProd=${kitCalculated.hourlyReal}`);
+              addLog(`Gravando cache no SP (T:${rawApi.length}, K:${rawKit.length}, Planejado: ${kitPlanned})...`);
               await withTimeout(updateApiCache(config.id, {
                 teste: JSON.stringify(testeCalculated),
                 kit: JSON.stringify(kitCalculated)
@@ -393,7 +288,7 @@ export default function App() {
         try {
           addLog(`Iniciando fetch direto para ${k}...`);
           if (k === 'Teste API') {
-            const rawData = await withTimeout(fetchApiData(), 90000);
+            const rawData = await withTimeout(fetchApiData(), 15000);
             addLog(`Dados Teste API recebidos: ${Array.isArray(rawData) ? rawData.length : 'objeto'} itens.`);
             const apiResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
             const totalQtd = apiResults.reduce((acc: number, item: any) => acc + Number(item.QTD ?? item.qtd ?? 0), 0);
@@ -401,47 +296,13 @@ export default function App() {
           } else if (k === 'MONTAGEM KIT') {
             const plannedKitPromise = fetchPlannedKitValue(addLog);
             const [rawData, kitPlanned] = await Promise.all([
-              withTimeout(fetchKitData(), 120000),
-              withTimeout(plannedKitPromise, 120000)
+              withTimeout(fetchKitData(), 15000),
+              plannedKitPromise
             ]);
-            addLog(`Dados Kit: ${Array.isArray(rawData) ? rawData.length : 0} itens recebidos.`);
+            addLog(`Dados Montagem Kit recebidos: ${Array.isArray(rawData) ? rawData.length : 'objeto'} itens.`);
             const kitResults = Array.isArray(rawData) ? rawData : ((rawData as any)?.value || []);
-            
-            if (kitResults.length > 0 && isDebugEnabled) {
-              addLog(`DEBUG KIT: Primeiro item data: "${kitResults[0].DATA || kitResults[0].data}"`, "info");
-            }
-
-            const nowBR = getSaoPauloDate();
-            // ... (rest of filtering) ...
-            const day = String(nowBR.getDate()).padStart(2, '0');
-            const month = String(nowBR.getMonth() + 1).padStart(2, '0');
-            const yearFull = nowBR.getFullYear();
-            const yearShort = String(yearFull).slice(-2);
-            const todayStrFull = `${day}/${month}/${yearFull}`;
-            const todayStrShort = `${day}/${month}/${yearShort}`;
-            const currentH = nowBR.getHours();
-
-            const kitResultsToday = kitResults.filter((item: any) => {
-              const dStr = String(item.DATA ?? item.data ?? '').trim();
-              return dStr.startsWith(todayStrFull) || dStr.startsWith(todayStrShort);
-            });
-
-            // Se o array de hoje estiver vazio mas o rawData geral não, logar aviso.
-            if (kitResultsToday.length === 0 && kitResults.length > 0) {
-                addLog(`Nenhum item do Kit encontrado para HOJE (${todayStrFull}) no servidor. Total bruto: ${kitResults.length}`, "warn");
-            }
-
-            const kitCalculated = {
-              totalDisp: kitResultsToday.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0),
-              plannedValue: kitPlanned > 0 ? kitPlanned : undefined, // pass undefined if 0 to keep existing
-              hourlyReal: kitResultsToday.filter((item: any) => {
-                const dStr = item.DATA ?? item.data;
-                const m = String(dStr).match(/\d{2}\/\d{2}\/\d{2,4} (\d{2}):/);
-                return m ? parseInt(m[1], 10) === currentH : false;
-              }).reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0)
-            };
-
-            updateStateWithCalculatedResults({ kit: kitCalculated });
+            const totalDisp = kitResults.reduce((acc: number, item: any) => acc + Number(item.QUANTIDADE ?? item.quantidade ?? 0), 0);
+            updateStateWithCalculatedResults({ kit: { totalDisp }, kitPlanned });
           }
         } catch (err) {
           addLog(`Erro em ${k}: ${String(err)}`, 'error');
@@ -524,70 +385,6 @@ export default function App() {
       loadApiData();
     }
   }, [secondsUntilRefresh]);
-
-  // NOVO: Effect para atualizar o relógio do KIT em tempo real
-  useEffect(() => {
-    const updateKitClock = () => {
-      setSummaryData(prev => {
-        if (!prev['MONTAGEM KIT']) return prev;
-        const kit = prev['MONTAGEM KIT'];
-        
-        // Re-calcula apenas se tivermos uma meta definida
-        if (kit.plannedDay <= 0) return prev;
-
-        const startHour = 5 + 20 / 60;
-        const endHour = 23;
-        const windowDuration = endHour - startHour;
-        const totalWorkHours = 13.3;
-        
-        const now = getSaoPauloDate();
-        const currentHourDecimal = now.getHours() + (now.getMinutes() / 60);
-        const windowElapsed = Math.max(0, Math.min(windowDuration, currentHourDecimal - startHour));
-        
-        const remainingWindow = Math.max(0, windowDuration - windowElapsed);
-        const workToWindowRatio = totalWorkHours / windowDuration;
-        const remainingWorkHours = remainingWindow * workToWindowRatio;
-        const elapsedWorkHours = windowElapsed * workToWindowRatio;
-
-        const hourlyRateBase = kit.plannedDay / totalWorkHours;
-        const expectedAccumulated = Math.floor(hourlyRateBase * elapsedWorkHours);
-        const deltaResult = kit.totalAvailable - expectedAccumulated;
-
-        let recoveryRate = 0;
-        if (remainingWorkHours > 0.05) {
-          recoveryRate = Math.ceil(Math.max(0, kit.plannedDay - kit.totalAvailable) / remainingWorkHours);
-        }
-
-        const remHours = Math.floor(remainingWorkHours);
-        const remMinutes = Math.round((remainingWorkHours - remHours) * 60);
-        const remainingTimeText = remainingWorkHours > 0 ? `${remHours}h ${remMinutes}m` : '0h 0m';
-
-        // Só atualiza se houver mudança relevante
-        if (kit.remainingTimeText === remainingTimeText && 
-            kit.plannedToHour === recoveryRate && 
-            kit.delta === deltaResult) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          'MONTAGEM KIT': {
-            ...kit,
-            plannedToHour: recoveryRate,
-            delta: deltaResult,
-            deltaProduction: deltaResult,
-            remainingTimeText,
-            baseHourlyRate: Math.floor(hourlyRateBase)
-          }
-        };
-      });
-    };
-
-    updateKitClock(); // Executa imediatamente
-    const timer = setInterval(updateKitClock, 30000); // Depois a cada 30 segundos
-
-    return () => clearInterval(timer);
-  }, []);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -719,13 +516,7 @@ export default function App() {
                   <div className="text-zinc-400 italic text-center py-12">Sem eventos para exibir no momento</div>
                 ) : (
                   logs.map((log, i) => (
-                    <div key={i} className={`p-3 rounded-lg border leading-relaxed ${
-                      log.type === 'error' 
-                        ? 'bg-red-50 border-red-200 text-red-700 shadow-sm' 
-                        : log.type === 'warn' 
-                          ? 'bg-amber-50 border-amber-200 text-amber-700 shadow-sm'
-                          : 'bg-white border-zinc-200 text-zinc-700 shadow-sm'
-                    }`}>
+                    <div key={i} className={`p-3 rounded-lg border leading-relaxed ${log.type === 'error' ? 'bg-red-50 border-red-200 text-red-700 shadow-sm' : 'bg-white border-zinc-200 text-zinc-700 shadow-sm'}`}>
                       <div className="flex justify-between mb-1 opacity-60 text-[9px] font-bold">
                         <span>{log.type.toUpperCase()}</span>
                         <span>{log.timestamp}</span>

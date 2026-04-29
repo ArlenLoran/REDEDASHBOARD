@@ -28,8 +28,6 @@ export interface SummaryMetric {
   totalAvailable: number;
   deltaProduction: number;
   isLoading?: boolean;
-  remainingTimeText?: string;
-  baseHourlyRate?: number;
 }
 
 export interface DetailedMetric {

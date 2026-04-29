@@ -18,7 +18,6 @@ interface SummaryCardProps {
 
 const SummaryCard: React.FC<SummaryCardProps> = ({ metric, onClick }) => {
   const isPositiveDelta = metric.delta >= 0;
-  const isPositiveSign = metric.delta > 0;
 
   return (
     <div className="bg-[#CCCCCC] rounded-lg overflow-hidden shadow-md flex flex-col h-full border border-gray-400 group">
@@ -64,13 +63,13 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ metric, onClick }) => {
                     {metric.title === 'Teste API' ? 'Diferença' : 'Delta'}
                   </p>
                   <p className={`text-sm font-bold ${isPositiveDelta ? 'text-[#008000]' : 'text-[#D40511]'}`}>
-                      {isPositiveSign ? '+' : ''}{metric.delta}
+                      {isPositiveDelta ? '+' : ''}{metric.delta}
                   </p>
               </div>
           </div>
 
           {/* Bottom Row */}
-          <div className="grid grid-cols-2 gap-1 mb-2">
+          <div className="grid grid-cols-2 gap-1">
               <div className="bg-[#999999] p-1 rounded-sm text-center">
                   <p className="text-[7px] font-bold text-[#333] uppercase leading-tight">
                     {metric.title === 'Teste API' ? 'Total' : 'Total Disp.'}
@@ -84,20 +83,6 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ metric, onClick }) => {
                   <p className="text-sm font-bold">+{metric.deltaProduction}</p>
               </div>
           </div>
-
-          {/* Extra Info (Kit Specific) */}
-          {metric.title === 'MONTAGEM KIT' && (
-            <div className="grid grid-cols-2 gap-1 mt-2 border-t border-gray-400 pt-2 pb-1 bg-white/30 rounded-b-sm">
-              <div className="text-center border-r border-gray-300">
-                <p className="text-[7px] font-extrabold text-[#444] uppercase leading-tight">Tempo Restante</p>
-                <p className="text-xs font-black text-[#D35400]">{metric.remainingTimeText || '--h --m'}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-[7px] font-extrabold text-[#444] uppercase leading-tight">Meta Base/H</p>
-                <p className="text-xs font-black text-[#D35400]">{metric.baseHourlyRate ?? '0'}</p>
-              </div>
-            </div>
-          )}
         </div>
         {metric.isLoading && (
           <div className="absolute top-1 right-1">
